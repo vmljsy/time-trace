@@ -1,0 +1,11 @@
+[project]
+name = "timetrace"
+version = "0.5.0"
+description = "A zero-dependency TUI time tracker for developers"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+timetrace = "main:main"

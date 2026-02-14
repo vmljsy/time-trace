@@ -60,28 +60,35 @@ class Console:
         """Write *text* into the buffer at row *y*, column *x*.
 
         Wide characters (emoji, CJK) correctly consume two cells.
+        If *text* contains newlines, each line is printed at successive rows.
         """
-        if not (0 <= y < self.height):
-            return
-        if x >= self.width:
-            return
+        # Handle multi-line strings
+        lines = text.split('\n')
+        for line_offset, line in enumerate(lines):
+            current_y = y + line_offset
+            if not (0 <= current_y < self.height):
+                continue
+            if x >= self.width:
+                continue
 
-        col = 0  # visual column offset
-        for char in text:
-            pos = x + col
-            if pos >= self.width:
-                break
+            col = 0  # visual column offset
+            for char in line:
+                pos = x + col
+                if pos >= self.width:
+                    break
 
-            eaw = unicodedata.east_asian_width(char)
-            char_width = 2 if eaw in ("W", "F") else 1
+                eaw = unicodedata.east_asian_width(char)
+                char_width = 2 if eaw in ("W", "F") else 1
 
-            self.buffer[y][pos] = f"{style}{char}\033[0m"
+                # Skip writing space characters to allow text layering
+                if char != ' ':
+                    self.buffer[current_y][pos] = f"{style}{char}\033[0m"
 
-            # Wide chars occupy 2 cells — blank the next cell
-            if char_width == 2 and pos + 1 < self.width:
-                self.buffer[y][pos + 1] = ""
+                    # Wide chars occupy 2 cells — blank the next cell
+                    if char_width == 2 and pos + 1 < self.width:
+                        self.buffer[current_y][pos + 1] = ""
 
-            col += char_width
+                col += char_width
 
     # ------------------------------------------------------------------
     # Rendering

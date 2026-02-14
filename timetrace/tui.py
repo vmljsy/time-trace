@@ -7,6 +7,7 @@ corresponds to a different screen (dashboard, reports, history, etc.).
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -20,6 +21,7 @@ from timetrace import VERSION
 from timetrace.config import THEMES, TIME_FORMAT
 from timetrace.console import Console
 from timetrace.database import TimeTrace
+from timetrace.formatter import format_history_table, format_report_bars, format_config_list
 from timetrace.platform import Platform
 from timetrace.utils import parse_time_input
 
@@ -99,7 +101,6 @@ class TraceTUI:
         h, w = self.console.height, self.console.width
         cfg = self.app.get_config()
         theme = THEMES.get(cfg.get("theme", "Default"), THEMES["Default"])
-
         # Rate-limited background updates
         now = time.time()
         if now - self.last_idle_check > 2.0:
@@ -126,14 +127,17 @@ class TraceTUI:
         active = self.app.get_active()
         projects = self.app.get_projects()
         history = self.app.get_recent_history()
-
+        
+        n = len(theme["title"].splitlines())+1
         # --- Header ---
-        self.console.print_at(1, 2, f"🏁 TIMETRACE v{VERSION}", theme["header"])
-        self.console.print_at(1, w - 20, f"📅 Today: {self.cached_today}", theme["header"])
+        self.console.print_at(1,1, f"{theme["title"]} v{VERSION}", theme["header"])
+    
+        self.console.print_at(n-2, w - 20, f"📅 Logged: {self.cached_today}", theme["header"])
+        self.console.print_at(n-1, w - 24, f"📅 {datetime.now().strftime('%A')} {datetime.now().strftime('%d/%m/%Y')}", theme["header"])
 
-        # --- Box border ---
-        self.console.print_at(3, 1, "┌" + "─" * (w - 4) + "┐", theme["box"])
-        for y in range(4, h - 2):
+        # --- Box border ---``
+        self.console.print_at(n, 1, "┌" + "─" * (w - 4) + "┐", theme["box"])
+        for y in range(n+1, h - 2):
             self.console.print_at(y, 1, "│", theme["box"])
             self.console.print_at(y, w - 2, "│", theme["box"])
         self.console.print_at(h - 2, 1, "└" + "─" * (w - 4) + "┘", theme["box"])
@@ -156,7 +160,7 @@ class TraceTUI:
         elif self.mode in ("ADD_TASK", "ADD_START", "ADD_END"):
             self._draw_add(h, w)
         elif self.mode == "TAG_FILTER":
-            self._draw_tag_filter(h, w)
+            self._draw_tag_filter(h, w, theme)
         elif self.mode == "CONFIG":
             self._draw_config(h, w, theme)
         elif self.mode == "HELP":
@@ -183,34 +187,34 @@ class TraceTUI:
         self.console.print_at(h // 2 + 2, w // 2 - 15, "Use #tags inline (e.g. #meeting)", "\033[2m")
 
     def _draw_reports(self, h: int, w: int, theme: dict[str, str]) -> None:
+        y_start = len(theme["title"].splitlines()) 
         p_map = {"today": "TODAY", "week": "WEEK", "month": "MONTH", "all": "ALL"}
         tab_str = ""
         for k, v in p_map.items():
             tab_str += f"[{v}] " if self.report_period == k else f" {v}  "
 
         mode_label = "BY TAG" if self.report_mode == "tag" else "BY PROJECT"
-        self.console.print_at(4, 4, f"📊 REPORT ({mode_label}): {tab_str}", "\033[1m")
-        self.console.print_at(4, w - 30, "1-4 filter  5 toggle view", "\033[2m")
+        self.console.print_at(y_start+2, 4, f"📊 REPORT ({mode_label}): {tab_str}", "\033[1m")
+        self.console.print_at(y_start+2, w - 30, "1-4 filter  5 toggle view", "\033[2m")
 
-        row = 6
-        max_val = max(self.cached_stats.values()) if self.cached_stats else 1
+        row = y_start + 4
         bar_width = w - 40
-        total_period = sum(self.cached_stats.values())
 
-        self.console.print_at(row, 6, f"TOTAL: {str(timedelta(seconds=int(total_period)))}", theme["highlight"])
-        row += 2
-
-        for p, sec in self.cached_stats.items():
+        # Use formatter to generate bar chart rows
+        formatted_bars = format_report_bars(self.cached_stats, bar_width, self.report_mode)
+        
+        for label, bar, duration, total_str in formatted_bars:
             if row >= h - 4:
                 break
-            pct = sec / max_val
-            bar_len = int(pct * bar_width)
-            dur = str(timedelta(seconds=int(sec)))
-            label = f"#{p}" if self.report_mode == "tag" else p
-            self.console.print_at(row, 6, f"{label[:15]:<15}")
-            self.console.print_at(row, 22, "█" * bar_len, theme["bar"])
-            self.console.print_at(row, 22 + bar_len + 1, dur)
-            row += 2
+            
+            if total_str:  # First row is the total
+                self.console.print_at(row, 6, f"TOTAL: {total_str}", theme["highlight"])
+                row += 2
+            else:
+                self.console.print_at(row, 6, label)
+                self.console.print_at(row, 22, bar, theme["bar"])
+                self.console.print_at(row, 22 + len(bar) + 1, duration)
+                row += 2
 
     def _draw_forgot(self, h: int, w: int) -> None:
         self.console.print_at(h // 2 - 3, w // 2 - 15, "🕰️  RETROACTIVE START", "\033[1;33m")
@@ -225,33 +229,28 @@ class TraceTUI:
         self.console.print_at(h // 2 + 2, w // 2 - 15, f" {self.input_text + '_'} ", "\033[7m")
 
     def _draw_history(self, h: int, w: int, theme: dict[str, str]) -> None:
-        self.console.print_at(4, 4, "📜 HISTORY MANAGER", "\033[1;33m")
-        self.console.print_at(4, w - 55, "[a] Add [e] Edit [del] Delete [x] Export [g] Tag filter", "\033[2m")
+        y_start = len(theme["title"].splitlines())
+        self.console.print_at(y_start+2, 4, "📜 HISTORY MANAGER", theme.get("warn", "\033[1;33m"))
+        self.console.print_at(y_start+2, w - 55, "[a] Add [e] Edit [del] Delete [x] Export [g] Tag filter", theme.get("dim", "\033[2m"))
 
         if self.tag_filter:
-            self.console.print_at(5, 6, f"🏷️ Filtered: #{self.tag_filter}  (press g to clear)", "\033[1;36m")
+            self.console.print_at(y_start+3, 6, f"🏷️ Filtered: #{self.tag_filter}  (press g to clear)", theme.get("tag", "\033[1;36m"))
 
         all_logs = self.app.get_recent_history(limit=50)
         logs = [e for e in all_logs if self.tag_filter in e.get("tags", [])] if self.tag_filter else all_logs
         visible_rows = h - 10 if self.tag_filter else h - 9
         scroll_offset = max(0, self.selected_idx - visible_rows + 1)
-        row_start = 7 if self.tag_filter else 6
+        row_start = y_start + 5 if self.tag_filter else y_start + 4
 
-        for i in range(visible_rows):
-            idx = scroll_offset + i
-            if idx >= len(logs):
-                break
-            entry = logs[idx]
-            style = "\033[7m" if idx == self.selected_idx else ""
-            ts = entry.get("start_time", "")[-8:] if entry.get("start_time") else ""
-            tags_str = " ".join(f"#{t}" for t in entry.get("tags", []))
-            max_task_w = 15 if tags_str else 18
-            line = f" {idx + 1:2d}. {entry['task'][:max_task_w]:<{max_task_w}} | {entry['duration']:<8} | {ts}"
+        # Use formatter to generate table rows
+        formatted_rows = format_history_table(logs, visible_rows, scroll_offset, self.selected_idx)
+        
+        for i, (line, style, tags_str) in enumerate(formatted_rows):
             self.console.print_at(row_start + i, 6, line, style)
-            if tags_str and not style:
-                self.console.print_at(row_start + i, 6 + len(line) + 1, tags_str[:20], "\033[36m")
+            if tags_str:
+                self.console.print_at(row_start + i, 6 + len(line) + 1, tags_str[:20], theme.get("tag", "\033[36m"))
 
-        self.console.print_at(h - 4, 6, f"Entries: {len(logs)}  Selected: {self.selected_idx + 1}", "\033[2m")
+        self.console.print_at(h - 4, 6, f"Entries: {len(logs)}  Selected: {self.selected_idx + 1}", theme.get("dim", "\033[2m"))
 
     def _draw_edit(self, h: int, w: int) -> None:
         cx, cy = w // 2 - 22, h // 2 - 6
@@ -295,11 +294,11 @@ class TraceTUI:
         if self.add_error:
             self.console.print_at(cy + 12, cx, f"⚠ {self.add_error}", "\033[1;31m")
 
-    def _draw_tag_filter(self, h: int, w: int) -> None:
-        self.console.print_at(4, 4, "🏷️ SELECT TAG TO FILTER:", "\033[1;36m")
+    def _draw_tag_filter(self, h: int, w: int, theme: dict[str, str]) -> None:
+        self.console.print_at(4, 4, "🏷️ SELECT TAG TO FILTER:", theme.get("tag", "\033[1;36m"))
         all_tags = self.app.get_all_tags()
         if not all_tags:
-            self.console.print_at(6, 6, "No tags found. Use #tags when creating tasks.", "\033[2m")
+            self.console.print_at(6, 6, "No tags found. Use #tags when creating tasks.", theme.get("dim", "\033[2m"))
         else:
             visible = h - 10
             scroll_off = max(0, self.selected_idx - visible + 1)
@@ -309,31 +308,59 @@ class TraceTUI:
                     break
                 style = "\033[7m" if idx == self.selected_idx else ""
                 self.console.print_at(6 + i, 6, f" #{all_tags[idx]} ", style)
-            self.console.print_at(h - 4, 6, f"Tags: {len(all_tags)}  Selected: {self.selected_idx + 1}", "\033[2m")
+            self.console.print_at(h - 4, 6, f"Tags: {len(all_tags)}  Selected: {self.selected_idx + 1}", theme.get("dim", "\033[2m"))
 
     def _draw_config(self, h: int, w: int, theme: dict[str, str]) -> None:
         cfg = self.app.get_config()
-        self.config_options = [
-            ("BEHAVIOR", "idle_threshold", f"Idle Warning: {cfg.get('idle_threshold')}s", "cycle", [10, 30, 60, 300, 600, 1800]),
-            ("BEHAVIOR", "auto_backup", f"Auto Backup: {'ON' if cfg.get('auto_backup') else 'OFF'}", "bool", None),
-            ("BEHAVIOR", "backup_freq", f"Backup Freq: {cfg.get('backup_freq')}", "cycle", ["STOP", "DAILY", "WEEKLY"]),
-            ("VISUAL", "heatmap_days", f"Heatmap Rows: {cfg.get('heatmap_days')}", "cycle", [7, 14, 28]),
-            ("VISUAL", "heatmap_start", f"Heatmap Start: {cfg.get('heatmap_start')}h", "cycle", [0, 6, 7, 8, 9, 10]),
-            ("VISUAL", "heatmap_end", f"Heatmap End: {cfg.get('heatmap_end')}h", "cycle", [17, 18, 20, 22, 23]),
-            ("VISUAL", "heatmap_weekdays", f"Heatmap Days: {cfg.get('heatmap_weekdays')}", "cycle", ["MTWTFSS", "MTWTF--", "-----SS"]),
-            ("VISUAL", "theme", f"Theme: {cfg.get('theme')}", "cycle", list(THEMES.keys())),
-            ("FEATURES", "feature_billing", f"Billing: {'ON' if cfg.get('feature_billing') else 'OFF'}", "bool", None),
-            ("FEATURES", "feature_html_report", f"HTML Reports: {'ON' if cfg.get('feature_html_report') else 'OFF'}", "bool", None),
-            ("FEATURES", "notifications", f"Notifications: {'ON' if cfg.get('notifications', True) else 'OFF'}", "bool", None),
-            ("CORE", None, f"DB Path: {self.app.db_path[-30:]}", "info", None),
-            ("CORE", None, f"Webhooks: {len(cfg.get('on_stop', []))} Active", "info", None),
-        ]
+        
+        # Load config options from JSON file
+        config_options_path = os.path.join(os.path.dirname(__file__), "config_options.json")
+        try:
+            with open(config_options_path, "r", encoding="utf-8") as f:
+                options_data = json.load(f)
+            
+            # Build config_options list dynamically from JSON
+            self.config_options = []
+            for opt in options_data.get("options", []):
+                category = opt.get("category", "")
+                key = opt.get("key")
+                opt_type = opt.get("type", "")
+                choices = opt.get("choices")
+                
+                # Build the label with current value
+                if opt_type == "bool":
+                    value_str = "ON" if cfg.get(key, False) else "OFF"
+                    label = f"{opt.get('label')}: {value_str}"
+                elif opt_type == "cycle":
+                    value = cfg.get(key)
+                    suffix = opt.get("suffix", "")
+                    label = f"{opt.get('label')}: {value}{suffix}"
+                elif opt_type == "info":
+                    # Info-only fields
+                    display_type = opt.get("display", "")
+                    if display_type == "db_path":
+                        label = f"{opt.get('label')}: {self.app.db_path[-30:]}"
+                    elif display_type == "webhook_count":
+                        label = f"{opt.get('label')}: {len(cfg.get('on_stop', []))} Active"
+                    else:
+                        label = opt.get("label", "")
+                else:
+                    label = opt.get("label", "")
+                
+                self.config_options.append((category, key, label, opt_type, choices))
+        
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            # Fallback to basic options if JSON file is missing or invalid
+            self.config_options = [
+                ("ERROR", None, f"Failed to load config options: {str(e)[:40]}", "info", None)
+            ]
+        y_start = len(theme["title"].splitlines()) 
 
-        self.console.print_at(4, 4, "⚙️  CONFIGURATION", "\033[1;35m")
-        self.console.print_at(4, w - 25, "[Enter] Toggle/Edit", "\033[2m")
+        self.console.print_at(y_start+2, 4, "⚙️  CONFIGURATION", "\033[1;35m")
+        self.console.print_at(y_start+2, w - 25, "[Enter] Toggle/Edit", "\033[2m")
 
         last_cat = ""
-        row = 6
+        row = y_start+4
         for i, opt in enumerate(self.config_options):
             cat, _key, label, _typ, _choices = opt
             if row >= h - 3:
@@ -402,53 +429,54 @@ class TraceTUI:
         cfg: dict[str, Any],
         theme: dict[str, str],
     ) -> None:
+        n = len(theme["title"].splitlines())
         if active and active["action"] == "START":
             start_t = datetime.strptime(active["timestamp"], TIME_FORMAT)
             dur = str(datetime.now() - start_t).split(".")[0]
             started_at = start_t.strftime("%H:%M")
             active_tags = self.app._cache_active_tags
             tags_str = " ".join(f"#{t}" for t in active_tags) if active_tags else ""
-            self.console.print_at(5, 4, f"▶️ ACTIVE: {active['task']}", theme["highlight"])
+            self.console.print_at(n+3, 4, f"▶️ ACTIVE: {active['task']}", theme.get("active", theme["highlight"]))
             if tags_str:
-                self.console.print_at(5, 14 + len(active["task"]), f" {tags_str}", "\033[36m")
-            self.console.print_at(6, 4, f"⏱️ RUNNING: {dur}  (since {started_at})", theme["highlight"])
+                self.console.print_at(n+3, 14 + len(active["task"]), f" {tags_str}", theme.get("tag", "\033[36m"))
+            self.console.print_at(n+4, 4, f"⏱️ RUNNING: {dur}  (since {started_at})", theme.get("active", theme["highlight"]))
 
             threshold = cfg.get("idle_threshold", 300)
             if self.cached_idle > threshold:
-                self.console.print_at(6, 45, f"⚠️ IDLE: {int(self.cached_idle)}s", theme["warn"])
+                self.console.print_at(n+4, 45, f"⚠️ IDLE: {int(self.cached_idle)}s", theme["warn"])
 
             today_sessions = len([
                 e for e in history
                 if e.get("start_time", "")[:10] == datetime.now().strftime("%Y-%m-%d")
             ])
-            self.console.print_at(7, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", "\033[2m")
+            self.console.print_at(n+5, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", theme.get("dim", "\033[2m"))
         else:
-            self.console.print_at(5, 4, "💤 STATUS: IDLE", "\033[2m")
+            self.console.print_at(n+3, 4, "💤 STATUS: IDLE", theme.get("dim", "\033[2m"))
             today_sessions = len([
                 e for e in history
                 if e.get("start_time", "")[:10] == datetime.now().strftime("%Y-%m-%d")
             ])
-            self.console.print_at(6, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", "\033[2m")
+            self.console.print_at(n+4, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", theme.get("dim", "\033[2m"))
 
         # History (left column)
-        self.console.print_at(9, 4, "📜 RECENT SESSIONS:", "\033[1;33m")
+        self.console.print_at(n+3, 4, "📜 RECENT SESSIONS:", theme.get("warn", "\033[1;33m"))
         for i, entry in enumerate(history):
             tags_str = " ".join(f"#{t}" for t in entry.get("tags", []))
             line = f"• {entry['task']:<20} | {entry['duration']}"
             self.console.print_at(11 + i, 6, line)
             if tags_str:
-                self.console.print_at(11 + i, 6 + len(line) + 1, tags_str[:20], "\033[36m")
+                self.console.print_at(11 + i, 6 + len(line) + 1, tags_str[:20], theme.get("tag", "\033[36m"))
 
         # Heatmap (right column)
         mid_x = w // 2 + 2
         if mid_x < w - 20:
-            self.console.print_at(9, mid_x, "🔥 ACTIVITY:", "\033[1;33m")
+            self.console.print_at(n+3, mid_x, "🔥 ACTIVITY:", theme.get("warn", "\033[1;33m"))
             s_h = cfg.get("heatmap_start", 8)
             e_h = cfg.get("heatmap_end", 20)
             hour_label = "    "
             for hr in range(s_h, e_h + 1):
                 hour_label += f"{hr:02d}" if hr % 3 == 0 else "  "
-            self.console.print_at(10, mid_x, hour_label, "\033[2m")
+            self.console.print_at(n+4, mid_x, hour_label, theme.get("dim", "\033[2m"))
 
             hm_chars = ["·", "░", "▒", "▓", "█"]
             hm_styles = ["\033[2m", "\033[32m", "\033[32m", "\033[1;32m", "\033[1;32m"]

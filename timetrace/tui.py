@@ -125,8 +125,11 @@ class TraceTUI:
                 self.cached_stats = self.app.get_project_stats(self.report_period)
             self.last_stats_update = now
         if self.mode == "REPORTS" and self.report_view == "timeline" and (now - self.last_timeline_update > 5.0 or not self.cached_timeline):
+            # Use period-appropriate day count instead of heatmap_days
+            _period_days = {"today": 1, "week": 7, "month": 31, "all": 365}
+            tl_days = _period_days.get(self.report_period, 7)
             self.cached_timeline = self.app.get_timeline_matrix(
-                cfg.get("heatmap_days", 7),
+                tl_days,
                 cfg.get("heatmap_start", 6),
                 cfg.get("heatmap_end", 23),
                 cfg.get("heatmap_weekdays", "MTWTFSS"),

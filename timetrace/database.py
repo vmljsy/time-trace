@@ -158,7 +158,7 @@ class TimeTrace:
                     for tag in self._get_tags_for_log(conn, self._cache_active["id"]):
                         stats[tag] = stats.get(tag, 0) + active_secs
 
-        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True)[:8])
+        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True))
 
     def get_project_stats(self, period: str = "all") -> dict[str, float]:
         """Return ``{project: seconds}`` for the specified *period*."""
@@ -184,7 +184,7 @@ class TimeTrace:
                 p = self._cache_active["task"]
                 stats[p] = stats.get(p, 0) + self._active_seconds()
 
-        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True)[:8])
+        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True))
 
     def get_today_total(self) -> str:
         """Total tracked time today as ``H:MM:SS``."""

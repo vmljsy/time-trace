@@ -37,6 +37,12 @@ class TraceTUI:
         # State
         self.mode: str = "DASH"
         self.selected_idx: int = 0
+        self.dashboard_scroll_idx: int = 0
+        self.select_scroll_idx: int = 0
+        self.reports_scroll_idx: int = 0
+        self.tag_filter_scroll_idx: int = 0
+        self.config_scroll_idx: int = 0
+        self.help_scroll_idx: int = 0
         self.config_idx: int = 0
         self.input_text: str = ""
 
@@ -84,6 +90,15 @@ class TraceTUI:
 
         # Auto-resume state
         self.auto_stopped_payload: str | None = None
+
+    @property
+    def header_height(self) -> int:
+        """Return height of the header title + border margin.
+        Content should generally start at header_height + 2.
+        """
+        cfg = self.app.get_config()
+        theme = THEMES.get(cfg.get("theme", "Default"), THEMES["Default"])
+        return len(theme["title"].splitlines()) + 1
 
     # ------------------------------------------------------------------
     # Main loop
@@ -237,10 +252,34 @@ class TraceTUI:
     # Draw helpers — each mode gets its own method for clarity
     # ------------------------------------------------------------------
     def _draw_select(self, projects: list[str], theme: dict[str, str]) -> None:
-        self.console.print_at(4, 4, "📁 SELECT RECENT PROJECT:", "\033[1m")
-        for i, p in enumerate(projects):
-            style = "\033[7m" if i == self.selected_idx else ""
-            self.console.print_at(6 + i, 6, f" {p} ", style)
+        y_start = self.header_height
+        self.console.print_at(y_start + 2, 4, "📁 SELECT RECENT PROJECT:", "\033[1m")
+        
+        h = self.console.height
+        available_lines = max(0, h - (y_start + 4) - 2) # -2 for footer/border
+        
+        # Scroll logic
+        max_scroll = max(0, len(projects) - available_lines)
+        self.select_scroll_idx = max(0, min(self.select_scroll_idx, max_scroll))
+        
+        # Auto-scroll if selection is out of view
+        if self.selected_idx < self.select_scroll_idx:
+            self.select_scroll_idx = self.selected_idx
+        elif self.selected_idx >= self.select_scroll_idx + available_lines:
+            self.select_scroll_idx = self.selected_idx - available_lines + 1
+            
+        visible_projects = projects[self.select_scroll_idx : self.select_scroll_idx + available_lines]
+
+        for i, p in enumerate(visible_projects):
+            real_idx = self.select_scroll_idx + i
+            style = "\033[7m" if real_idx == self.selected_idx else ""
+            self.console.print_at(y_start + 4 + i, 6, f" {p} ", style)
+            
+        # Indicators
+        if self.select_scroll_idx > 0:
+            self.console.print_at(y_start + 2, 30, "↑", theme.get("dim", "\033[2m"))
+        if len(projects) > self.select_scroll_idx + available_lines:
+             self.console.print_at(h - 3, 4, "↓", theme.get("dim", "\033[2m"))
 
     def _draw_input(self, h: int, w: int) -> None:
         self.console.print_at(h // 2 - 2, w // 2 - 10, "📝 NEW TASK NAME:", "\033[1m")
@@ -257,6 +296,13 @@ class TraceTUI:
         view_label = "TIMELINE" if self.report_view == "timeline" else ("BY TAG" if self.report_mode == "tag" else "BY PROJECT")
         self.console.print_at(y_start+2, 4, f"📊 REPORT ({view_label}): {tab_str}", "\033[1m")
         self.console.print_at(y_start+2, w - 40, "1-4 filter  5 toggle  6 timeline", "\033[2m")
+        
+        # Restore data fetching
+        if not self.cached_stats:
+            if self.report_mode == "tag":
+                 self.cached_stats = self.app.get_tag_stats(self.report_period)
+            else:
+                 self.cached_stats = self.app.get_project_stats(self.report_period)
 
         if self.report_view == "timeline":
             self._draw_timeline(h, w, theme)
@@ -264,26 +310,43 @@ class TraceTUI:
 
         row = y_start + 4
         bar_width = w - 40
+        available_lines = max(0, h - row - 2)
 
         # Use formatter to generate bar chart rows
         formatted_bars = format_report_bars(self.cached_stats, bar_width, self.report_mode)
         
-        for label, bar, duration, total_str in formatted_bars:
-            if row >= h - 4:
+        total_items = len(formatted_bars)
+        # We can fit available_lines // 2 items (each item is 2 lines)
+        visible_items_count = available_lines // 2
+        
+        max_scroll = max(0, total_items - visible_items_count)
+        self.reports_scroll_idx = max(0, min(self.reports_scroll_idx, max_scroll))
+        
+        visible_bars = formatted_bars[self.reports_scroll_idx : self.reports_scroll_idx + visible_items_count]
+        
+        current_y = row
+        for label, bar, duration, total_str in visible_bars:
+            if current_y >= h - 2:
                 break
             
             if total_str:  # First row is the total
-                self.console.print_at(row, 6, f"TOTAL: {total_str}", theme["highlight"])
-                row += 2
+                self.console.print_at(current_y, 6, f"TOTAL: {total_str}", theme["highlight"])
+                current_y += 2
             else:
-                self.console.print_at(row, 6, label)
-                self.console.print_at(row, 22, bar, theme["bar"])
-                self.console.print_at(row, 22 + len(bar) + 1, duration)
-                row += 2
+                self.console.print_at(current_y, 6, label)
+                self.console.print_at(current_y, 22, bar, theme["bar"])
+                self.console.print_at(current_y, 22 + len(bar) + 1, duration)
+                current_y += 2
+        
+        # Indicators
+        if self.reports_scroll_idx > 0:
+            self.console.print_at(y_start + 2, 25, "↑", theme.get("dim", "\033[2m"))
+        if total_items > self.reports_scroll_idx + visible_items_count:
+            self.console.print_at(h - 3, 4, "↓", theme.get("dim", "\033[2m"))
 
     def _draw_timeline(self, h: int, w: int, theme: dict[str, str]) -> None:
         """Render a full-width calendar timeline with labeled project blocks."""
-        y_start = len(theme["title"].splitlines())
+        y_start = self.header_height
         cfg = self.app.get_config()
         s_h = cfg.get("heatmap_start", 6)
         e_h = cfg.get("heatmap_end", 23)
@@ -383,7 +446,7 @@ class TraceTUI:
         self.console.print_at(h // 2 + 2, w // 2 - 15, f" {self.input_text + '_'} ", "\033[7m")
 
     def _draw_history(self, h: int, w: int, theme: dict[str, str]) -> None:
-        y_start = len(theme["title"].splitlines())
+        y_start = self.header_height
         self.console.print_at(y_start+2, 4, "📜 HISTORY MANAGER", theme.get("warn", "\033[1;33m"))
         self.console.print_at(y_start+2, w - 55, "[a] Add [e] Edit [del] Delete [x] Export [g] Tag filter", theme.get("dim", "\033[2m"))
 
@@ -392,14 +455,20 @@ class TraceTUI:
 
         all_logs = self.app.get_recent_history(limit=50)
         logs = [e for e in all_logs if self.tag_filter in e.get("tags", [])] if self.tag_filter else all_logs
-        visible_rows = h - 10 if self.tag_filter else h - 9
-        scroll_offset = max(0, self.selected_idx - visible_rows + 1)
+        
         row_start = y_start + 5 if self.tag_filter else y_start + 4
+        # Dynamic visible_rows based on header height
+        visible_rows = max(0, h - row_start - 2)
+        
+        scroll_offset = max(0, self.selected_idx - visible_rows + 1)
 
         # Use formatter to generate table rows
         formatted_rows = format_history_table(logs, visible_rows, scroll_offset, self.selected_idx)
         
         for i, (line, style, tags_str) in enumerate(formatted_rows):
+            # Strict bounds check
+            if row_start + i >= h - 2:
+                break
             self.console.print_at(row_start + i, 6, line, style)
             if tags_str:
                 self.console.print_at(row_start + i, 6 + len(line) + 1, tags_str[:20], theme.get("tag", "\033[36m"))
@@ -449,19 +518,30 @@ class TraceTUI:
             self.console.print_at(cy + 12, cx, f"⚠ {self.add_error}", "\033[1;31m")
 
     def _draw_tag_filter(self, h: int, w: int, theme: dict[str, str]) -> None:
-        self.console.print_at(4, 4, "🏷️ SELECT TAG TO FILTER:", theme.get("tag", "\033[1;36m"))
+        y_start = self.header_height
+        self.console.print_at(y_start + 2, 4, "🏷️ SELECT TAG TO FILTER:", theme.get("tag", "\033[1;36m"))
         all_tags = self.app.get_all_tags()
         if not all_tags:
-            self.console.print_at(6, 6, "No tags found. Use #tags when creating tasks.", theme.get("dim", "\033[2m"))
+            self.console.print_at(y_start + 4, 6, "No tags found. Use #tags when creating tasks.", theme.get("dim", "\033[2m"))
         else:
-            visible = h - 10
-            scroll_off = max(0, self.selected_idx - visible + 1)
+            visible = max(0, h - (y_start + 6))
+            
+            # Sync scroll with selection
+            if self.selected_idx < self.tag_filter_scroll_idx:
+                self.tag_filter_scroll_idx = self.selected_idx
+            elif self.selected_idx >= self.tag_filter_scroll_idx + visible:
+                self.tag_filter_scroll_idx = self.selected_idx - visible + 1
+            
+            # Clamp
+            max_scroll = max(0, len(all_tags) - visible)
+            self.tag_filter_scroll_idx = max(0, min(self.tag_filter_scroll_idx, max_scroll))
+
             for i in range(visible):
-                idx = scroll_off + i
+                idx = self.tag_filter_scroll_idx + i
                 if idx >= len(all_tags):
                     break
                 style = "\033[7m" if idx == self.selected_idx else ""
-                self.console.print_at(6 + i, 6, f" #{all_tags[idx]} ", style)
+                self.console.print_at(y_start + 4 + i, 6, f" #{all_tags[idx]} ", style)
             self.console.print_at(h - 4, 6, f"Tags: {len(all_tags)}  Selected: {self.selected_idx + 1}", theme.get("dim", "\033[2m"))
 
     def _draw_config(self, h: int, w: int, theme: dict[str, str]) -> None:
@@ -509,23 +589,77 @@ class TraceTUI:
                 ("ERROR", None, f"Failed to load config options: {str(e)[:40]}", "info", None)
             ]
         y_start = len(theme["title"].splitlines()) 
+        # Keep y_start logic consistent
+        y_start = self.header_height - 1 # adjust since header_height includes +1
 
         self.console.print_at(y_start+2, 4, "⚙️  CONFIGURATION", "\033[1;35m")
         self.console.print_at(y_start+2, w - 25, "[Enter] Toggle/Edit", "\033[2m")
-
+        
         last_cat = ""
         row = y_start+4
+        
+        available_lines = max(0, h - row - 2)
+        
+        # Config has variable height items (category headers + options)
+        # Current logic re-renders everything. We need a linearized list to scroll properly.
+        # But wait, config_options is flat-ish. 
+        # Let's map visual rows to options.
+        # Simpler approach: Just scroll the options list and render visible + headers? 
+        # No, headers are inserted dynamically.
+        # Better: Linearize the display list first.
+        
+        display_list = []
+        l_cat = ""
         for i, opt in enumerate(self.config_options):
             cat, _key, label, _typ, _choices = opt
-            if row >= h - 3:
+            if cat != l_cat:
+                display_list.append((f"[{cat}]", "", -1)) # -1 index means not selectable
+                l_cat = cat
+            display_list.append((label, "option", i))
+            
+        # Select logic needs to map config_idx (index in config_options) to index in display_list?
+        # Actually config_idx refers to config_options index.
+        # We need to find where that is in display_list to scroll to it.
+        
+        selected_display_idx = 0
+        for di, (_txt, _type, opt_idx) in enumerate(display_list):
+            if opt_idx == self.config_idx:
+                selected_display_idx = di
                 break
-            if cat != last_cat:
-                self.console.print_at(row, 6, f"[{cat}]", "\033[1;90m")
-                row += 1
-                last_cat = cat
-            style = "\033[7m" if i == self.config_idx else ""
-            self.console.print_at(row, 8, f"{label:<40}", style)
-            row += 1
+                
+        # Scroll logic based on display_list
+        if selected_display_idx < self.config_scroll_idx:
+            self.config_scroll_idx = selected_display_idx
+        elif selected_display_idx >= self.config_scroll_idx + available_lines:
+            self.config_scroll_idx = selected_display_idx - available_lines + 1
+            
+        max_scroll = max(0, len(display_list) - available_lines)
+        self.config_scroll_idx = max(0, min(self.config_scroll_idx, max_scroll))
+        
+        visible_rows = display_list[self.config_scroll_idx : self.config_scroll_idx + available_lines]
+        
+        curr_y = row
+        for text, dtype, opt_idx in visible_rows:
+            if curr_y >= h - 2:
+                break
+            
+            if dtype == "": # Header
+                self.console.print_at(curr_y, 6, text, "\033[1;90m")
+            else:
+                style = "\033[7m" if opt_idx == self.config_idx else ""
+                # Truncate label
+                max_w = w - 10
+                if len(text) > max_w:
+                    text = text[:max_w-1] + "…"
+                self.console.print_at(curr_y, 8, f"{text:<40}", style)
+            
+            curr_y += 1
+            
+        # Indicators
+        if self.config_scroll_idx > 0:
+            self.console.print_at(y_start + 2, 25, "↑", theme.get("dim", "\033[2m"))
+        if len(display_list) > self.config_scroll_idx + available_lines:
+            self.console.print_at(h - 3, 4, "↓", theme.get("dim", "\033[2m"))
 
     def _draw_help(self, h: int, w: int, theme: dict[str, str]) -> None:
         """Render the help / keybindings reference screen."""
@@ -562,18 +696,37 @@ class TraceTUI:
             ]),
         ]
 
-        row = 6
+        # Flatten help for scrolling
+        help_lines = []
         for section, keys in bindings:
-            if row >= h - 4:
-                break
-            self.console.print_at(row, 6, f"[{section}]", "\033[1;90m")
-            row += 1
+            help_lines.append((f"[{section}]", "header"))
             for key, desc in keys:
-                if row >= h - 4:
-                    break
-                self.console.print_at(row, 8, f"{key:>8}  {desc}")
-                row += 1
+                help_lines.append((f"{key:>8}  {desc}", "item"))
+            help_lines.append(("", "spacer"))
+            
+        y_start = self.header_height
+        available_lines = max(0, h - (y_start + 4) - 2)
+        
+        max_scroll = max(0, len(help_lines) - available_lines)
+        self.help_scroll_idx = max(0, min(self.help_scroll_idx, max_scroll))
+        
+        visible_help = help_lines[self.help_scroll_idx : self.help_scroll_idx + available_lines]
+        
+        row = y_start + 4
+        for text, ltype in visible_help:
+            if row >= h - 2:
+                break
+            if ltype == "header":
+                self.console.print_at(row, 6, text, "\033[1;90m")
+            else:
+                self.console.print_at(row, 8, text)
             row += 1
+            
+        # Indicators
+        if self.help_scroll_idx > 0:
+            self.console.print_at(y_start + 2, 30, "↑", theme.get("dim", "\033[2m"))
+        if len(help_lines) > self.help_scroll_idx + available_lines:
+            self.console.print_at(h - 3, 4, "↓", theme.get("dim", "\033[2m"))
 
     def _draw_dashboard(
         self,
@@ -591,57 +744,104 @@ class TraceTUI:
             started_at = start_t.strftime("%H:%M")
             active_tags = self.app._cache_active_tags
             tags_str = " ".join(f"#{t}" for t in active_tags) if active_tags else ""
-            self.console.print_at(n+3, 4, f"▶️ ACTIVE: {active['task']}", theme.get("active", theme["highlight"]))
+            
+            # Truncate active task to avoid hitting heatmap (approx mid_x)
+            max_active_w = (w // 2) - 14
+            task_display = active['task']
+            if len(task_display) > max_active_w:
+                task_display = task_display[:max_active_w-1] + "…"
+            
+            self.console.print_at(n+2, 4, f"▶️ ACTIVE: {task_display}", theme.get("active", theme["highlight"]))
             if tags_str:
-                self.console.print_at(n+3, 14 + len(active["task"]), f" {tags_str}", theme.get("tag", "\033[36m"))
+                self.console.print_at(n+2, 14 + len(task_display), f" {tags_str}", theme.get("tag", "\033[36m"))
             
             # Show animated spinner next to "RUNNING" text
             spinner_str = f" {self.current_spinner_frame} "
-            self.console.print_at(n+4, 4, f"⏱️ RUNNING{spinner_str}: {dur}  (since {started_at})", theme.get("active", theme["highlight"]))
+            self.console.print_at(n+3, 4, f"⏱️ RUNNING{spinner_str}: {dur}  (since {started_at})", theme.get("active", theme["highlight"]))
 
             threshold = cfg.get("idle_threshold", 300)
             if self.cached_idle > threshold:
-                self.console.print_at(n+4, 45, f"⚠️ IDLE: {int(self.cached_idle)}s", theme["warn"])
+                self.console.print_at(n+3, 45, f"⚠️ IDLE: {int(self.cached_idle)}s", theme["warn"])
 
-            today_sessions = len([
-                e for e in history
-                if e.get("start_time", "")[:10] == datetime.now().strftime("%Y-%m-%d")
-            ])
-            self.console.print_at(n+5, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", theme.get("dim", "\033[2m"))
-        else:
-            self.console.print_at(n+3, 4, "💤 STATUS: IDLE", theme.get("dim", "\033[2m"))
             today_sessions = len([
                 e for e in history
                 if e.get("start_time", "")[:10] == datetime.now().strftime("%Y-%m-%d")
             ])
             self.console.print_at(n+4, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", theme.get("dim", "\033[2m"))
+        else:
+            self.console.print_at(n+2, 4, "💤 STATUS: IDLE", theme.get("dim", "\033[2m"))
+            today_sessions = len([
+                e for e in history
+                if e.get("start_time", "")[:10] == datetime.now().strftime("%Y-%m-%d")
+            ])
+            self.console.print_at(n+3, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", theme.get("dim", "\033[2m"))
 
         # History (left column)
-        self.console.print_at(n+3, 4, "📜 RECENT SESSIONS:", theme.get("warn", "\033[1;33m"))
-        for i, entry in enumerate(history):
+        hist_start_y = n + 7
+        self.console.print_at(hist_start_y, 4, "📜 RECENT SESSIONS:", theme.get("warn", "\033[1;33m"))
+        
+        # Calculate available rows for history
+        # Box bottom is h-2. history starts at hist_start_y+2 (header + blank)
+        # So last valid row is h-3.
+        # available = (h-3) - (hist_start_y+1)
+        available_rows = max(0, h - 3 - (hist_start_y + 1))
+        
+        # Clamp scroll index
+        max_scroll = max(0, len(history) - available_rows)
+        self.dashboard_scroll_idx = max(0, min(self.dashboard_scroll_idx, max_scroll))
+        
+        visible_history = history[self.dashboard_scroll_idx : self.dashboard_scroll_idx + available_rows]
+        
+        for i, entry in enumerate(visible_history):
             tags_str = " ".join(f"#{t}" for t in entry.get("tags", []))
-            line = f"• {entry['task']:<20} | {entry['duration']}"
-            self.console.print_at(11 + i, 6, line)
+            
+            # Truncate task name to fit in allowed width (approx half screen width - margins)
+            # Layout: [margin(6)] [task(20)] [sep(3)] [dur(8)] [tags(...)]
+            # We must also ensure we don't hit the right border (w-2)
+            # Let's say history column gets ~50% width or just ensuring it doesn't cross w-2
+            
+            max_len = w - 8  # Global right limit
+            
+            line_prefix = f"• {entry['task'][:20]:<20} | {entry['duration']}"
+            
+            # Print prefix, truncated if needed
+            if len(line_prefix) > max_len:
+                line_prefix = line_prefix[:max_len-1] + "…"
+            
+            self.console.print_at(hist_start_y + 1 + i, 6, line_prefix)
+            
+            # Print tags if there's room
             if tags_str:
-                self.console.print_at(11 + i, 6 + len(line) + 1, tags_str[:20], theme.get("tag", "\033[36m"))
+                current_len = len(line_prefix)
+                remaining = w - 6 - current_len - 2 
+                if remaining > 3:
+                     if len(tags_str) > remaining:
+                         tags_str = tags_str[:remaining-1] + "…"
+                     self.console.print_at(hist_start_y + 1 + i, 6 + len(line_prefix) + 1, tags_str, theme.get("tag", "\033[36m"))
+
+        # Scroll indicators
+        if self.dashboard_scroll_idx > 0:
+            self.console.print_at(hist_start_y, 24, "↑", theme.get("dim", "\033[2m"))
+        if len(history) > self.dashboard_scroll_idx + available_rows:
+            self.console.print_at(h-3, 4, "↓", theme.get("dim", "\033[2m"))
 
         # Heatmap (right column)
         mid_x = w // 2 + 2
         if mid_x < w - 20:
-            self.console.print_at(n+3, mid_x, "🔥 ACTIVITY:", theme.get("warn", "\033[1;33m"))
+            self.console.print_at(n+2, mid_x, "🔥 ACTIVITY:", theme.get("warn", "\033[1;33m"))
             s_h = cfg.get("heatmap_start", 8)
             e_h = cfg.get("heatmap_end", 20)
             hour_label = "    "
             for hr in range(s_h, e_h + 1):
                 hour_label += f"{hr:02d}" if hr % 3 == 0 else "  "
-            self.console.print_at(n+4, mid_x, hour_label, theme.get("dim", "\033[2m"))
+            self.console.print_at(n+3, mid_x, hour_label, theme.get("dim", "\033[2m"))
 
             hm_chars = ["·", "░", "▒", "▓", "█"]
             hm_styles = ["\033[2m", "\033[32m", "\033[32m", "\033[1;32m", "\033[1;32m"]
             if theme == THEMES["Dark"]:
                 hm_styles = ["\033[2m", "\033[34m", "\033[34m", "\033[1;34m", "\033[1;34m"]
 
-            hm_row = 11
+            hm_row = n + 4
             if self.cached_heatmap:
                 for label, slots in self.cached_heatmap:
                     if hm_row >= h - 3:
@@ -671,7 +871,7 @@ class TraceTUI:
         if self.mode == "HELP":
             return " [q] Back to Dashboard "
         # Dashboard
-        return " [s] Select  [n] New  [t] Stop  [r] Reports  [f] Forgot  [h] Hist  [c] Conf  [b] Backup  [?] Help  [q] Quit "
+        return " [s] Select  [n] New  [t] Stop  [r] Repts  [f] Forgot  [h] Hist  [c] Conf  [b] Backup  [↑/↓] Scroll  [?] Help  [q] Quit "
 
     # ==================================================================
     # INPUT HANDLING
@@ -741,6 +941,7 @@ class TraceTUI:
         if ch == "s":
             self.mode = "SELECT"
             self.selected_idx = 0
+            self.select_scroll_idx = 0 # Reset scroll
             self.auto_stopped_payload = None
         elif ch == "n":
             self.mode = "INPUT"
@@ -764,6 +965,12 @@ class TraceTUI:
             self.app.backup_db()
         elif ch == "?":
             self.mode = "HELP"
+            self.help_scroll_idx = 0
+        elif ch == "UP":
+            self.dashboard_scroll_idx = max(0, self.dashboard_scroll_idx - 1)
+        elif ch == "DOWN":
+            # Max scroll will be clamped in _draw_dashboard, but we can increment here
+            self.dashboard_scroll_idx += 1
 
     def _input_reports(self, ch: str) -> None:
         period_map = {"1": "today", "2": "week", "3": "month", "4": "all"}
@@ -776,6 +983,10 @@ class TraceTUI:
         elif ch == "6":
             self.report_view = "timeline" if self.report_view == "bars" else "bars"
             self.cached_timeline = []
+        elif ch == "UP":
+            self.reports_scroll_idx = max(0, self.reports_scroll_idx - 1)
+        elif ch == "DOWN":
+            self.reports_scroll_idx += 1
 
     def _input_config(self, ch: str) -> None:
         cat, key, label, typ, choices = self.config_options[self.config_idx]
@@ -793,6 +1004,7 @@ class TraceTUI:
                 except (ValueError, AttributeError):
                     idx = 0
                 new_val = choices[(idx + 1) % len(choices)]
+                new_val = choices[(idx + 1) % len(choices)]
                 self.app.update_config(key, new_val)
                 
                 # Special handling for spinner style update
@@ -801,54 +1013,14 @@ class TraceTUI:
                     self.spinner.reset()
 
     def _input_select(self, ch: str) -> None:
-        if ch == "\x1b":
-            self.mode = "DASH"
-        elif ch == "UP":
+        projects = self.app.get_projects()
+        if ch == "UP":
             self.selected_idx = max(0, self.selected_idx - 1)
         elif ch == "DOWN":
-            self.selected_idx = min(len(self.app.get_projects()) - 1, self.selected_idx + 1)
-        elif ch in ("\r", "\n"):
-            projects = self.app.get_projects()
-            if projects:
-                self.app.start(projects[self.selected_idx])
+            self.selected_idx = min(len(projects) - 1, self.selected_idx + 1)
+        elif ch in ("\r", "\n") and projects:
+            self.app.start(projects[self.selected_idx])
             self.mode = "DASH"
-
-    def _input_new_task(self, ch: str) -> None:
-        if ch == "\x1b":
-            self.mode = "DASH"
-        elif ch in ("\r", "\n"):
-            self.app.start(self.input_text)
-            self.mode = "DASH"
-        elif ch in ("\x08", "\x7f"):
-            self.input_text = self.input_text[:-1]
-        elif len(ch) == 1 and ch.isprintable():
-            self.input_text += ch
-
-    def _input_forgot(self, ch: str) -> None:
-        if ch == "\x1b":
-            self.mode = "DASH"
-        elif ch in ("\r", "\n"):
-            if self.input_text.isdigit():
-                self.temp_time = int(self.input_text)
-                self.mode = "FORGOT_TASK"
-                self.input_text = ""
-            else:
-                self.mode = "DASH"
-        elif ch in ("\x08", "\x7f"):
-            self.input_text = self.input_text[:-1]
-        elif len(ch) == 1 and ch.isdigit():
-            self.input_text += ch
-
-    def _input_forgot_task(self, ch: str) -> None:
-        if ch == "\x1b":
-            self.mode = "DASH"
-        elif ch in ("\r", "\n"):
-            self.app.start_retroactive(self.input_text, self.temp_time)
-            self.mode = "DASH"
-        elif ch in ("\x08", "\x7f"):
-            self.input_text = self.input_text[:-1]
-        elif len(ch) == 1 and ch.isprintable():
-            self.input_text += ch
 
     def _input_history(self, ch: str) -> None:
         all_logs = self.app.get_recent_history(limit=50)
@@ -892,6 +1064,17 @@ class TraceTUI:
             else:
                 self.mode = "TAG_FILTER"
                 self.selected_idx = 0
+        elif ch == "q":
+            self.mode = "DASH"
+
+    def _input_help(self, ch: str) -> None:
+        # Help scrolling
+        if ch == "UP":
+            self.help_scroll_idx = max(0, self.help_scroll_idx - 1)
+        elif ch == "DOWN":
+             self.help_scroll_idx += 1
+        elif ch == "\x1b":
+            self.mode = "DASH"
 
     def _input_tag_filter(self, ch: str) -> None:
         all_tags = self.app.get_all_tags()
@@ -1053,7 +1236,39 @@ class TraceTUI:
         elif len(ch) == 1 and ch.isprintable():
             self.input_text += ch
 
-    def _input_help(self, ch: str) -> None:
-        # Any key returns to dashboard (q is already handled globally)
+    def _input_new_task(self, ch: str) -> None:
         if ch == "\x1b":
             self.mode = "DASH"
+        elif ch in ("\r", "\n"):
+            self.app.start(self.input_text)
+            self.mode = "DASH"
+        elif ch in ("\x08", "\x7f"):
+            self.input_text = self.input_text[:-1]
+        elif len(ch) == 1 and ch.isprintable():
+            self.input_text += ch
+
+    def _input_forgot(self, ch: str) -> None:
+        if ch == "\x1b":
+            self.mode = "DASH"
+        elif ch in ("\r", "\n"):
+            if self.input_text.isdigit():
+                self.temp_time = int(self.input_text)
+                self.mode = "FORGOT_TASK"
+                self.input_text = ""
+            else:
+                self.mode = "DASH"
+        elif ch in ("\x08", "\x7f"):
+            self.input_text = self.input_text[:-1]
+        elif len(ch) == 1 and ch.isdigit():
+            self.input_text += ch
+
+    def _input_forgot_task(self, ch: str) -> None:
+        if ch == "\x1b":
+            self.mode = "DASH"
+        elif ch in ("\r", "\n"):
+            self.app.start_retroactive(self.input_text, self.temp_time)
+            self.mode = "DASH"
+        elif ch in ("\x08", "\x7f"):
+            self.input_text = self.input_text[:-1]
+        elif len(ch) == 1 and ch.isprintable():
+            self.input_text += ch

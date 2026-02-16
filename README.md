@@ -25,6 +25,7 @@ Track tasks, view reports, manage history — all from your terminal.
 ---
 ## Screenshots
 <img width="1115" height="628" alt="image" src="https://github.com/user-attachments/assets/823430c9-7358-425b-a213-4ee9f6a303c3" />
+<img width="1115" height="628" alt="image" src="https://github.com/user-attachments/assets/a30c4094-89b2-47bc-80c3-fbfa14c6b93e" />
 <img width="1115" height="628" alt="Screenshot 2026-02-15 022550" src="https://github.com/user-attachments/assets/21b48fb4-79a6-4d3f-af0d-c40119f84df3" />
 <img width="1115" height="628" alt="Screenshot 2026-02-15 022733" src="https://github.com/user-attachments/assets/efde0b7a-e449-4fc2-8b87-69543bedacd6" />
 

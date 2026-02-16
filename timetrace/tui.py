@@ -18,12 +18,13 @@ if os.name == "nt":
     import msvcrt
 
 from timetrace import VERSION
-from timetrace.config import THEMES, TIME_FORMAT
+from timetrace.config import THEMES, TIME_FORMAT, PROJECT_COLORS
 from timetrace.console import Console
 from timetrace.database import TimeTrace
 from timetrace.formatter import format_history_table, format_report_bars, format_config_list
 from timetrace.platform import Platform
 from timetrace.utils import parse_time_input
+from timetrace.animation import get_spinner
 
 
 class TraceTUI:
@@ -48,6 +49,9 @@ class TraceTUI:
         self.last_stats_update: float = 0
         self.report_period: str = "today"
         self.report_mode: str = "project"  # "project" or "tag"
+        self.report_view: str = "bars"     # "bars" or "timeline"
+        self.cached_timeline: list = []
+        self.last_timeline_update: float = 0
 
         cfg = app.get_config()
         self.cached_heatmap = app.get_heatmap_matrix(
@@ -57,6 +61,11 @@ class TraceTUI:
             cfg.get("heatmap_weekdays", "MTWTFSS"),
         )
         self.last_heatmap_update: float = time.time()
+
+        # Animation state
+        self.spinner = get_spinner(cfg.get("spinner_style", "dots"))
+        self.last_spinner_update: float = 0
+        self.current_spinner_frame: str = ""
 
         self.tag_filter: str | None = None
 
@@ -72,6 +81,9 @@ class TraceTUI:
         self.add_new_start: str = ""
         self.add_new_end: str = ""
         self.add_error: str = ""
+
+        # Auto-resume state
+        self.auto_stopped_payload: str | None = None
 
     # ------------------------------------------------------------------
     # Main loop
@@ -106,6 +118,38 @@ class TraceTUI:
         if now - self.last_idle_check > 2.0:
             self.cached_idle = Platform.get_idle_seconds()
             self.last_idle_check = now
+            
+            # Auto-stop and sound check
+            active = self.app.get_active()
+            threshold = cfg.get("idle_threshold", 300)
+            
+            if active and active["action"] == "START":
+                if self.cached_idle > threshold:
+                    # Sound alert
+                    if cfg.get("idle_sound", False):
+                         # Rate limit sound to every 10s to avoid annoyance
+                         if not hasattr(self, "_last_idle_sound") or now - self._last_idle_sound > 10.0:
+                             sys.stdout.write("\a")
+                             sys.stdout.flush()
+                             self._last_idle_sound = now
+
+                    # Auto-stop
+                    if cfg.get("auto_stop_idle", False):
+                        stop_time = datetime.now() - timedelta(seconds=int(self.cached_idle))
+                        
+                        # Save state for auto-resume
+                        tags = self.app._cache_active_tags
+                        tags_str = " ".join(f"#{t}" for t in tags)
+                        self.auto_stopped_payload = f"{active['task']} {tags_str}".strip()
+                        
+                        self.app.stop(timestamp=stop_time)
+            
+            # Auto-resume check (only if NO active task and we have a saved payload)
+            elif self.auto_stopped_payload and cfg.get("auto_resume_idle", False):
+                if self.cached_idle < threshold: # User is back!
+                    self.app.start(self.auto_stopped_payload)
+                    self.auto_stopped_payload = None
+
         if now - self.last_today_update > 60.0:
             self.cached_today = self.app.get_today_total()
             self.last_today_update = now
@@ -115,6 +159,18 @@ class TraceTUI:
             else:
                 self.cached_stats = self.app.get_project_stats(self.report_period)
             self.last_stats_update = now
+        if self.mode == "REPORTS" and self.report_view == "timeline" and (now - self.last_timeline_update > 5.0 or not self.cached_timeline):
+            # Use period-appropriate day count instead of heatmap_days
+            _period_days = {"today": 1, "week": 7, "month": 31, "all": 365}
+            tl_days = _period_days.get(self.report_period, 7)
+            self.cached_timeline = self.app.get_timeline_matrix(
+                tl_days,
+                cfg.get("heatmap_start", 6),
+                cfg.get("heatmap_end", 23),
+                cfg.get("heatmap_weekdays", "MTWTFSS"),
+                self.report_period,
+            )
+            self.last_timeline_update = now
         if self.mode == "DASH" and now - self.last_heatmap_update > 60.0:
             self.cached_heatmap = self.app.get_heatmap_matrix(
                 cfg.get("heatmap_days", 7),
@@ -123,6 +179,11 @@ class TraceTUI:
                 cfg.get("heatmap_weekdays", "MTWTFSS"),
             )
             self.last_heatmap_update = now
+
+        # Update spinner frame every 0.1s
+        if now - self.last_spinner_update > 0.1:
+            self.current_spinner_frame = self.spinner.next_frame()
+            self.last_spinner_update = now
 
         active = self.app.get_active()
         projects = self.app.get_projects()
@@ -193,9 +254,13 @@ class TraceTUI:
         for k, v in p_map.items():
             tab_str += f"[{v}] " if self.report_period == k else f" {v}  "
 
-        mode_label = "BY TAG" if self.report_mode == "tag" else "BY PROJECT"
-        self.console.print_at(y_start+2, 4, f"📊 REPORT ({mode_label}): {tab_str}", "\033[1m")
-        self.console.print_at(y_start+2, w - 30, "1-4 filter  5 toggle view", "\033[2m")
+        view_label = "TIMELINE" if self.report_view == "timeline" else ("BY TAG" if self.report_mode == "tag" else "BY PROJECT")
+        self.console.print_at(y_start+2, 4, f"📊 REPORT ({view_label}): {tab_str}", "\033[1m")
+        self.console.print_at(y_start+2, w - 40, "1-4 filter  5 toggle  6 timeline", "\033[2m")
+
+        if self.report_view == "timeline":
+            self._draw_timeline(h, w, theme)
+            return
 
         row = y_start + 4
         bar_width = w - 40
@@ -215,6 +280,95 @@ class TraceTUI:
                 self.console.print_at(row, 22, bar, theme["bar"])
                 self.console.print_at(row, 22 + len(bar) + 1, duration)
                 row += 2
+
+    def _draw_timeline(self, h: int, w: int, theme: dict[str, str]) -> None:
+        """Render a full-width calendar timeline with labeled project blocks."""
+        y_start = len(theme["title"].splitlines())
+        cfg = self.app.get_config()
+        s_h = cfg.get("heatmap_start", 6)
+        e_h = cfg.get("heatmap_end", 23)
+        total_hours = e_h - s_h + 1
+
+        label_col = 4          # left margin
+        label_w = 8            # width reserved for day label
+        track_x = label_col + label_w  # where the track starts
+        track_w = w - track_x - 4      # available columns for the time track
+
+        if track_w < 10:
+            return  # terminal too narrow
+
+        def _hour_to_col(frac_hour: float) -> int:
+            """Map a fractional hour to a column offset within the track."""
+            ratio = (frac_hour - s_h) / total_hours
+            return int(ratio * track_w)
+
+        # ── Hour ruler ──
+        ruler_row = y_start + 4
+        # Draw dim baseline
+        self.console.print_at(ruler_row, track_x, "─" * track_w, theme.get("dim", "\033[2m"))
+        for hr in range(s_h, e_h + 2):
+            col = _hour_to_col(hr)
+            if col < track_w - 1:
+                self.console.print_at(ruler_row, track_x + col, f"{hr:02d}", theme.get("dim", "\033[2m"))
+
+        # ── Collect unique projects for legend ──
+        all_projects: list[str] = []
+        for _label, spans in self.cached_timeline:
+            for proj, _sf, _ef in spans:
+                if proj and proj not in all_projects:
+                    all_projects.append(proj)
+
+        # ── Day rows (2 lines per day: blocks + separator) ──
+        row = y_start + 5
+        for label, spans in self.cached_timeline:
+            if row >= h - 5:
+                break
+
+            # Day label
+            self.console.print_at(row, label_col, f"{label:>7}", theme.get("dim", "\033[2m"))
+
+            # Draw dim baseline for empty track
+            self.console.print_at(row, track_x, "─" * track_w, theme.get("heatmap_none", "\033[2m"))
+
+            # Draw session blocks
+            for proj, sf, ef in spans:
+                c1 = _hour_to_col(sf)
+                c2 = _hour_to_col(ef)
+                block_len = max(c2 - c1, 1)
+                color_idx = hash(proj) % len(PROJECT_COLORS)
+                color = PROJECT_COLORS[color_idx]
+                # Convert foreground (38;5;N) to background (48;5;N)
+                bg_color = color.replace("38;5;", "48;5;")
+
+                # Fill with solid block chars
+                self.console.print_at(row, track_x + c1, "█" * block_len, color)
+
+                # Overlay project name with bg color + contrasting text
+                name = proj[:block_len]
+                if block_len >= 3:
+                    name_x = c1 + (block_len - len(name)) // 2
+                    # Use white text for dark themes, black for light
+                    text_fg = "\033[97m" if "3" in theme.get("text", "\033[0m") else "\033[30m"
+                    self.console.print_at(row, track_x + name_x, name, f"{bg_color}{text_fg}\033[1m")
+
+            row += 1
+
+        # ── Legend ──
+        if all_projects:
+            legend_y = row + 1
+            if legend_y < h - 3:
+                self.console.print_at(legend_y, label_col, "LEGEND:", theme.get("dim", "\033[2m"))
+                lx = label_col + 8
+                for proj in all_projects:
+                    if lx + len(proj) + 5 > w - 4:
+                        legend_y += 1
+                        lx = label_col + 8
+                        if legend_y >= h - 3:
+                            break
+                    color_idx = hash(proj) % len(PROJECT_COLORS)
+                    self.console.print_at(legend_y, lx, "██", PROJECT_COLORS[color_idx])
+                    self.console.print_at(legend_y, lx + 3, proj[:15], theme.get("text", ""))
+                    lx += len(proj[:15]) + 5
 
     def _draw_forgot(self, h: int, w: int) -> None:
         self.console.print_at(h // 2 - 3, w // 2 - 15, "🕰️  RETROACTIVE START", "\033[1;33m")
@@ -403,6 +557,7 @@ class TraceTUI:
             ("REPORTS", [
                 ("1-4", "Period: Today/Week/Month/All"),
                 ("5", "Toggle Project ↔ Tag view"),
+                ("6", "Toggle Timeline calendar view"),
                 ("q", "Back to dashboard"),
             ]),
         ]
@@ -439,7 +594,10 @@ class TraceTUI:
             self.console.print_at(n+3, 4, f"▶️ ACTIVE: {active['task']}", theme.get("active", theme["highlight"]))
             if tags_str:
                 self.console.print_at(n+3, 14 + len(active["task"]), f" {tags_str}", theme.get("tag", "\033[36m"))
-            self.console.print_at(n+4, 4, f"⏱️ RUNNING: {dur}  (since {started_at})", theme.get("active", theme["highlight"]))
+            
+            # Show animated spinner next to "RUNNING" text
+            spinner_str = f" {self.current_spinner_frame} "
+            self.console.print_at(n+4, 4, f"⏱️ RUNNING{spinner_str}: {dur}  (since {started_at})", theme.get("active", theme["highlight"]))
 
             threshold = cfg.get("idle_threshold", 300)
             if self.cached_idle > threshold:
@@ -499,7 +657,7 @@ class TraceTUI:
     def _footer_text(self) -> str:
         _INPUT_MODES = {"INPUT", "FORGOT", "FORGOT_TASK", "EDIT_TASK", "EDIT_START", "EDIT_END", "ADD_TASK", "ADD_START", "ADD_END"}
         if self.mode == "REPORTS":
-            return " [1] Today [2] Week [3] Month [4] All [5] Toggle Tag/Project  [q] Back "
+            return " [1] Today [2] Week [3] Month [4] All [5] Toggle  [6] Timeline  [q] Back "
         if self.mode == "HISTORY":
             return " [UP/DN] Scroll  [a] Add  [e] Edit  [del/d] Delete  [x] Export  [g] Tags  [q] Back "
         if self.mode == "TAG_FILTER":
@@ -583,11 +741,14 @@ class TraceTUI:
         if ch == "s":
             self.mode = "SELECT"
             self.selected_idx = 0
+            self.auto_stopped_payload = None
         elif ch == "n":
             self.mode = "INPUT"
             self.input_text = ""
+            self.auto_stopped_payload = None
         elif ch == "t":
             self.app.stop()
+            self.auto_stopped_payload = None
         elif ch == "r":
             self.mode = "REPORTS"
         elif ch == "f":
@@ -612,6 +773,9 @@ class TraceTUI:
         elif ch == "5":
             self.report_mode = "tag" if self.report_mode == "project" else "project"
             self.cached_stats = {}
+        elif ch == "6":
+            self.report_view = "timeline" if self.report_view == "bars" else "bars"
+            self.cached_timeline = []
 
     def _input_config(self, ch: str) -> None:
         cat, key, label, typ, choices = self.config_options[self.config_idx]
@@ -628,7 +792,13 @@ class TraceTUI:
                     idx = choices.index(curr)
                 except (ValueError, AttributeError):
                     idx = 0
-                self.app.update_config(key, choices[(idx + 1) % len(choices)])
+                new_val = choices[(idx + 1) % len(choices)]
+                self.app.update_config(key, new_val)
+                
+                # Special handling for spinner style update
+                if key == "spinner_style":
+                    self.spinner = get_spinner(new_val)
+                    self.spinner.reset()
 
     def _input_select(self, ch: str) -> None:
         if ch == "\x1b":

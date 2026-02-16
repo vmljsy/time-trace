@@ -7,9 +7,65 @@ into display-ready strings, separate from terminal rendering logic.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import Any, Callable, List, Optional, Tuple
 
+
+@dataclass
+class Column:
+    """Definition of a table column."""
+    key: str
+    label: str
+    width: int
+    align: str = "<"  # < (left), > (right), ^ (center)
+    formatter: Optional[Callable[[Any, dict[str, Any]], str]] = None
+
+
+class TableFormatter:
+    """Unified engine for formatting tabular data."""
+    
+    def __init__(
+        self, 
+        columns: List[Column], 
+        sep: str = " | ",
+        show_header: bool = False
+    ) -> None:
+        self.columns = columns
+        self.sep = sep
+        self.show_header = show_header
+
+    def format_batch(
+        self, 
+        data: List[dict[str, Any]],
+        row_style_provider: Optional[Callable[[int, dict[str, Any]], str]] = None
+    ) -> List[Tuple[str, str]]:
+        """Format a list of dictionaries into lines and styles."""
+        rows = []
+        
+        if self.show_header:
+            header_parts = []
+            for col in self.columns:
+                fmt = f"{{:{col.align}{col.width}}}"
+                header_parts.append(fmt.format(col.label[:col.width]))
+            rows.append((self.sep.join(header_parts), "\033[1m"))
+
+        for i, entry in enumerate(data):
+            row_parts = []
+            for col in self.columns:
+                val = entry.get(col.key, "")
+                if col.formatter:
+                    val = col.formatter(val, entry)
+                
+                val_str = str(val)[:col.width]
+                fmt = f"{{:{col.align}{col.width}}}"
+                row_parts.append(fmt.format(val_str))
+            
+            line = self.sep.join(row_parts)
+            style = row_style_provider(i, entry) if row_style_provider else ""
+            rows.append((line, style))
+            
+        return rows
 
 def format_history_table(
     logs: list[dict[str, Any]],

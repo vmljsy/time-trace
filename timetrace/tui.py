@@ -776,80 +776,96 @@ class TraceTUI:
             ])
             self.console.print_at(n+3, 4, f"📈 Today: {self.cached_today} total  •  {today_sessions} sessions", theme.get("dim", "\033[2m"))
 
-        # History (left column)
+        # --- Split Layout ---
+        left_w = w // 2
+        right_w = w - left_w
+        
+        # History (Left Column)
         hist_start_y = n + 7
         self.console.print_at(hist_start_y, 4, "📜 RECENT SESSIONS:", theme.get("warn", "\033[1;33m"))
         
-        # Calculate available rows for history
-        # Box bottom is h-2. history starts at hist_start_y+2 (header + blank)
-        # So last valid row is h-3.
-        # available = (h-3) - (hist_start_y+1)
         available_rows = max(0, h - 3 - (hist_start_y + 1))
-        
-        # Clamp scroll index
         max_scroll = max(0, len(history) - available_rows)
         self.dashboard_scroll_idx = max(0, min(self.dashboard_scroll_idx, max_scroll))
         
         visible_history = history[self.dashboard_scroll_idx : self.dashboard_scroll_idx + available_rows]
         
         for i, entry in enumerate(visible_history):
+            if hist_start_y + 1 + i >= h - 2: break
+            
             tags_str = " ".join(f"#{t}" for t in entry.get("tags", []))
             
-            # Truncate task name to fit in allowed width (approx half screen width - margins)
-            # Layout: [margin(6)] [task(20)] [sep(3)] [dur(8)] [tags(...)]
-            # We must also ensure we don't hit the right border (w-2)
-            # Let's say history column gets ~50% width or just ensuring it doesn't cross w-2
-            
-            max_len = w - 8  # Global right limit
+            # Allow full left width minus margins
+            # Margin left 6, Margin right (to divider) 2?
+            max_len = left_w - 8 
+            if max_len < 10: max_len = 10 # Safety
             
             line_prefix = f"• {entry['task'][:20]:<20} | {entry['duration']}"
-            
-            # Print prefix, truncated if needed
             if len(line_prefix) > max_len:
                 line_prefix = line_prefix[:max_len-1] + "…"
             
             self.console.print_at(hist_start_y + 1 + i, 6, line_prefix)
             
-            # Print tags if there's room
             if tags_str:
                 current_len = len(line_prefix)
-                remaining = w - 6 - current_len - 2 
+                remaining = max_len - current_len - 1
                 if remaining > 3:
                      if len(tags_str) > remaining:
                          tags_str = tags_str[:remaining-1] + "…"
                      self.console.print_at(hist_start_y + 1 + i, 6 + len(line_prefix) + 1, tags_str, theme.get("tag", "\033[36m"))
 
-        # Scroll indicators
+        # Scroll indicators for history
         if self.dashboard_scroll_idx > 0:
             self.console.print_at(hist_start_y, 24, "↑", theme.get("dim", "\033[2m"))
         if len(history) > self.dashboard_scroll_idx + available_rows:
             self.console.print_at(h-3, 4, "↓", theme.get("dim", "\033[2m"))
 
-        # Heatmap (right column)
-        mid_x = w // 2 + 2
-        if mid_x < w - 20:
-            self.console.print_at(n+2, mid_x, "🔥 ACTIVITY:", theme.get("warn", "\033[1;33m"))
-            s_h = cfg.get("heatmap_start", 8)
-            e_h = cfg.get("heatmap_end", 20)
-            hour_label = "    "
+        # Heatmap (Right Column - Centered)
+        s_h = cfg.get("heatmap_start", 8)
+        e_h = cfg.get("heatmap_end", 20)
+        
+        # Calculate heatmap dimensions
+        num_slots = e_h - s_h + 1
+        hm_content_w = 5 + (num_slots * 2) # Date label (5) + slots
+        
+        # Center in right panel
+        # start_x is absolute x coordinate
+        # Right panel starts at left_w
+        # Center offset within right panel: (right_w - hm_content_w) // 2
+        hm_x = left_w + max(0, (right_w - hm_content_w) // 2)
+        
+        # Determine Vertical Center
+        # Available height from header (n) to bottom (h-2)
+        avail_h = (h - 2) - n
+        # Heatmap needs: 1 (Title) + 1 (Hour Ruler) + 7 (Days) = 9 lines approx
+        hm_req_h = 9 
+        # Start Y relative to n
+        hm_offset_y = max(0, (avail_h - hm_req_h) // 2)
+        hm_start_y = n + hm_offset_y
+        
+        if hm_x < w - 5: # Ensure it fits somewhat
+            self.console.print_at(hm_start_y, hm_x, "🔥 ACTIVITY:", theme.get("warn", "\033[1;33m"))
+            
+            hour_label = "     " # Match label offset
             for hr in range(s_h, e_h + 1):
                 hour_label += f"{hr:02d}" if hr % 3 == 0 else "  "
-            self.console.print_at(n+3, mid_x, hour_label, theme.get("dim", "\033[2m"))
+            self.console.print_at(hm_start_y + 1, hm_x, hour_label, theme.get("dim", "\033[2m"))
 
             hm_chars = ["·", "░", "▒", "▓", "█"]
             hm_styles = ["\033[2m", "\033[32m", "\033[32m", "\033[1;32m", "\033[1;32m"]
             if theme == THEMES["Dark"]:
                 hm_styles = ["\033[2m", "\033[34m", "\033[34m", "\033[1;34m", "\033[1;34m"]
 
-            hm_row = n + 4
+            row = hm_offset_y + n + 2
             if self.cached_heatmap:
                 for label, slots in self.cached_heatmap:
-                    if hm_row >= h - 3:
-                        break
-                    self.console.print_at(hm_row, mid_x, label, "\033[2m")
+                    if row >= h - 2: break
+                    self.console.print_at(row, hm_x, label, "\033[2m")
                     for i, val in enumerate(slots):
-                        self.console.print_at(hm_row, mid_x + 5 + i * 2, hm_chars[val], hm_styles[val])
-                    hm_row += 1
+                        px = hm_x + 5 + i * 2
+                        if px >= w - 2: break 
+                        self.console.print_at(row, px, hm_chars[val], hm_styles[val])
+                    row += 1
 
     # ------------------------------------------------------------------
     # Footer

@@ -14,6 +14,21 @@ from typing import Any
 # ---------------------------------------------------------------------------
 TIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
+# Distinct ANSI 256 colors for per-project timeline blocks.
+# Projects are assigned a colour via ``hash(name) % len(PROJECT_COLORS)``.
+PROJECT_COLORS: list[str] = [
+    "\033[38;5;204m",  # rose
+    "\033[38;5;39m",   # blue
+    "\033[38;5;214m",  # orange
+    "\033[38;5;48m",   # green
+    "\033[38;5;141m",  # purple
+    "\033[38;5;226m",  # yellow
+    "\033[38;5;51m",   # cyan
+    "\033[38;5;208m",  # amber
+    "\033[38;5;183m",  # lavender
+    "\033[38;5;114m",  # lime
+]
+
 THEMES: dict[str, dict[str, str]] = {
     "Default": {
         "box": "\033[0m",
@@ -28,6 +43,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[36m",
         "active": "\033[1;32m",
         "title" : "",
+        "heatmap_none": "\033[2m",
+        "heatmap_low": "\033[32m",
+        "heatmap_medium": "\033[32m",
+        "heatmap_high": "\033[1;32m",
+        "heatmap_peak": "\033[1;32m",
+        "hint_key": "\033[1;36m",
+        "hint_text": "\033[0m",
     },
     "Dark": {
         "box": "\033[90m",
@@ -42,6 +64,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[96m",
         "active": "\033[1;92m",
         "title" : "",
+        "heatmap_none": "\033[2m",
+        "heatmap_low": "\033[34m",
+        "heatmap_medium": "\033[34m",
+        "heatmap_high": "\033[1;34m",
+        "heatmap_peak": "\033[1;34m",
+        "hint_key": "\033[1;94m",
+        "hint_text": "\033[37m",
     },
     "Retro": {
         "box": "\033[32m",
@@ -56,6 +85,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[32m",
         "active": "\033[1;5;32m",
         "title" : "",
+        "heatmap_none": "\033[2;32m",
+        "heatmap_low": "\033[32m",
+        "heatmap_medium": "\033[32m",
+        "heatmap_high": "\033[1;32m",
+        "heatmap_peak": "\033[1;5;32m",
+        "hint_key": "\033[1;5;32m",
+        "hint_text": "\033[32m",
     },
     "Ocean": {
         "box": "\033[36m",
@@ -69,7 +105,19 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "\033[38;5;203m",
         "tag": "\033[38;5;51m",
         "active": "\033[1;38;5;87m",
-        "title" : "",
+        "title" : """████████╗██╗███╗   ███╗███████╗████████╗██████╗  █████╗  ██████╗███████╗
+╚══██╔══╝██║████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝
+   ██║   ██║██╔████╔██║█████╗     ██║   ██████╔╝███████║██║     █████╗  
+   ██║   ██║██║╚██╔╝██║██╔══╝     ██║   ██╔══██╗██╔══██║██║     ██╔══╝  
+   ██║   ██║██║ ╚═╝ ██║███████╗   ██║   ██║  ██║██║  ██║╚██████╗███████╗
+   ╚═╝   ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝""",
+        "heatmap_none": "\033[2;36m",
+        "heatmap_low": "\033[36m",
+        "heatmap_medium": "\033[38;5;39m",
+        "heatmap_high": "\033[1;38;5;45m",
+        "heatmap_peak": "\033[1;38;5;51m",
+        "hint_key": "\033[1;96m",
+        "hint_text": "\033[96m",
     },
     "Sunset": {
         "box": "\033[38;5;208m",
@@ -83,7 +131,24 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "\033[38;5;196m",
         "tag": "\033[38;5;217m",
         "active": "\033[1;38;5;220m",
-        "title" : "",
+        "title" : """                                 ___           ___                         ___           ___           ___           ___     
+      ___            ___        /  /\         /  /\          ___          /  /\         /  /\         /  /\         /  /\    
+     /__/\          /__/\      /  /::|       /  /::\        /__/\        /  /::\       /  /::\       /  /::\       /  /::\   
+     \  \:\         \__\:\    /  /:|:|      /  /:/\:\       \  \:\      /  /:/\:\     /  /:/\:\     /  /:/\:\     /  /:/\:\  
+      \__\:\        /  /::\  /  /:/|:|__   /  /::\ \:\       \__\:\    /  /::\ \:\   /  /::\ \:\   /  /:/  \:\   /  /::\ \:\ 
+      /  /::\    __/  /:/\/ /__/:/_|::::\ /__/:/\:\ \:\      /  /::\  /__/:/\:\_\:\ /__/:/\:\_\:\ /__/:/ \  \:\ /__/:/\:\ \:\
+     /  /:/\:\  /__/\/:/~~  \__\/  /~~/:/ \  \:\ \:\_\/     /  /:/\:\ \__\/~|::\/:/ \__\/  \:\/:/ \  \:\  \__\/ \  \:\ \:\_\/
+    /  /:/__\/  \  \::/           /  /:/   \  \:\ \:\      /  /:/__\/    |  |:|::/       \__\::/   \  \:\        \  \:\ \:\  
+   /__/:/        \  \:\          /  /:/     \  \:\_\/     /__/:/         |  |:|\/        /  /:/     \  \:\        \  \:\_\/  
+   \__\/          \__\/         /__/:/       \  \:\       \__\/          |__|:|~        /__/:/       \  \:\        \  \:\    
+                                \__\/         \__\/                       \__\|         \__\/         \__\/         \__\/    """,
+        "heatmap_none": "\033[2;38;5;180m",
+        "heatmap_low": "\033[38;5;208m",
+        "heatmap_medium": "\033[38;5;214m",
+        "heatmap_high": "\033[1;38;5;220m",
+        "heatmap_peak": "\033[1;38;5;228m",
+        "hint_key": "\033[1;38;5;214m",
+        "hint_text": "\033[38;5;223m",
     },
     "Forest": {
         "box": "\033[38;5;22m",
@@ -97,7 +162,17 @@ THEMES: dict[str, dict[str, str]] = {
         "error": "\033[38;5;160m",
         "tag": "\033[38;5;70m",
         "active": "\033[1;38;5;46m",
-        "title" : "",
+        "title" : """ ____  ____  __  __  ____  ____  ____    __    ___  ____ 
+(_  _)(_  _)(  \/  )( ___)(_  _)(  _ \  /__\  / __)( ___)
+  )(   _)(_  )    (  )__)   )(   )   / /(__)\( (__  )__) 
+ (__) (____)(_/\/\_)(____) (__) (_)\_)(__)(__)\___)(____)""",
+        "heatmap_none": "\033[2;38;5;22m",
+        "heatmap_low": "\033[38;5;28m",
+        "heatmap_medium": "\033[38;5;34m",
+        "heatmap_high": "\033[1;38;5;40m",
+        "heatmap_peak": "\033[1;38;5;46m",
+        "hint_key": "\033[1;38;5;34m",
+        "hint_text": "\033[38;5;34m",
     },
     "Nord": {
         "box": "\033[38;5;67m",
@@ -116,6 +191,13 @@ THEMES: dict[str, dict[str, str]] = {
    ██    ██ ██ ████ ██ █████      ██    ██████  ███████ ██      █████   
    ██    ██ ██  ██  ██ ██         ██    ██   ██ ██   ██ ██      ██      
    ██    ██ ██      ██ ███████    ██    ██   ██ ██   ██  ██████ ███████ """,
+        "heatmap_none": "\033[2;38;5;245m",
+        "heatmap_low": "\033[38;5;67m",
+        "heatmap_medium": "\033[38;5;109m",
+        "heatmap_high": "\033[1;38;5;150m",
+        "heatmap_peak": "\033[1;38;5;187m",
+        "hint_key": "\033[1;38;5;111m",
+        "hint_text": "\033[38;5;254m",
     },
     "Dracula": {
         "box": "\033[38;5;61m",
@@ -130,6 +212,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;117m",
         "active": "\033[1;38;5;212m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;240m",
+        "heatmap_low": "\033[38;5;61m",
+        "heatmap_medium": "\033[38;5;141m",
+        "heatmap_high": "\033[1;38;5;141m",
+        "heatmap_peak": "\033[1;38;5;212m",
+        "hint_key": "\033[1;38;5;141m",
+        "hint_text": "\033[38;5;253m",
     },
     "Gruvbox": {
         "box": "\033[38;5;241m",
@@ -144,6 +233,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;109m",
         "active": "\033[1;38;5;214m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;246m",
+        "heatmap_low": "\033[38;5;108m",
+        "heatmap_medium": "\033[38;5;142m",
+        "heatmap_high": "\033[1;38;5;142m",
+        "heatmap_peak": "\033[1;38;5;214m",
+        "hint_key": "\033[1;38;5;214m",
+        "hint_text": "\033[38;5;223m",
     },
     "Monokai": {
         "box": "\033[38;5;59m",
@@ -158,6 +254,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;141m",
         "active": "\033[1;38;5;226m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;243m",
+        "heatmap_low": "\033[38;5;59m",
+        "heatmap_medium": "\033[38;5;141m",
+        "heatmap_high": "\033[1;38;5;185m",
+        "heatmap_peak": "\033[1;38;5;226m",
+        "hint_key": "\033[1;38;5;81m",
+        "hint_text": "\033[38;5;252m",
     },
     "Solarized": {
         "box": "\033[38;5;240m",
@@ -172,6 +275,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;125m",
         "active": "\033[1;38;5;37m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;240m",
+        "heatmap_low": "\033[38;5;240m",
+        "heatmap_medium": "\033[38;5;37m",
+        "heatmap_high": "\033[1;38;5;64m",
+        "heatmap_peak": "\033[1;38;5;33m",
+        "hint_key": "\033[1;38;5;33m",
+        "hint_text": "\033[38;5;244m",
     },
     "Synthwave": {
         "box": "\033[38;5;90m",
@@ -186,6 +296,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;213m",
         "active": "\033[1;38;5;201m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;183m",
+        "heatmap_low": "\033[38;5;90m",
+        "heatmap_medium": "\033[38;5;165m",
+        "heatmap_high": "\033[1;38;5;201m",
+        "heatmap_peak": "\033[1;38;5;51m",
+        "hint_key": "\033[1;38;5;201m",
+        "hint_text": "\033[38;5;219m",
     },
     "Cyberpunk": {
         "box": "\033[38;5;21m",
@@ -200,6 +317,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;199m",
         "active": "\033[1;5;38;5;51m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;31m",
+        "heatmap_low": "\033[38;5;21m",
+        "heatmap_medium": "\033[38;5;45m",
+        "heatmap_high": "\033[1;38;5;51m",
+        "heatmap_peak": "\033[1;38;5;201m",
+        "hint_key": "\033[1;38;5;51m",
+        "hint_text": "\033[38;5;51m",
     },
     "Rose Pine": {
         "box": "\033[38;5;95m",
@@ -214,6 +338,13 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;175m",
         "active": "\033[1;38;5;217m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;102m",
+        "heatmap_low": "\033[38;5;95m",
+        "heatmap_medium": "\033[38;5;139m",
+        "heatmap_high": "\033[1;38;5;182m",
+        "heatmap_peak": "\033[1;38;5;217m",
+        "hint_key": "\033[1;38;5;182m",
+        "hint_text": "\033[38;5;188m",
     },
     "Tokyo Night": {
         "box": "\033[38;5;237m",
@@ -228,11 +359,21 @@ THEMES: dict[str, dict[str, str]] = {
         "tag": "\033[38;5;183m",
         "active": "\033[1;38;5;147m",
         "title" : "",
+        "heatmap_none": "\033[2;38;5;243m",
+        "heatmap_low": "\033[38;5;237m",
+        "heatmap_medium": "\033[38;5;75m",
+        "heatmap_high": "\033[1;38;5;111m",
+        "heatmap_peak": "\033[1;38;5;170m",
+        "hint_key": "\033[1;38;5;111m",
+        "hint_text": "\033[38;5;188m",
     },
 }
 
 _CONFIG_DEFAULTS: dict[str, Any] = {
     "idle_threshold": 300,
+    "auto_stop_idle": False,
+    "auto_resume_idle": False,
+    "idle_sound": False,
     "auto_backup": True,
     "backup_freq": "STOP",
     "feature_billing": False,
@@ -245,6 +386,7 @@ _CONFIG_DEFAULTS: dict[str, Any] = {
     "notifications": True,
     "on_start": [],
     "on_stop": [],
+    "spinner_style": "dots",
 }
 
 

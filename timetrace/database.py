@@ -158,7 +158,7 @@ class TimeTrace:
                     for tag in self._get_tags_for_log(conn, self._cache_active["id"]):
                         stats[tag] = stats.get(tag, 0) + active_secs
 
-        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True))
+        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True)[:8])
 
     def get_project_stats(self, period: str = "all") -> dict[str, float]:
         """Return ``{project: seconds}`` for the specified *period*."""
@@ -184,7 +184,7 @@ class TimeTrace:
                 p = self._cache_active["task"]
                 stats[p] = stats.get(p, 0) + self._active_seconds()
 
-        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True))
+        return dict(sorted(stats.items(), key=lambda kv: kv[1], reverse=True)[:8])
 
     def get_today_total(self) -> str:
         """Total tracked time today as ``H:MM:SS``."""
@@ -326,17 +326,12 @@ class TimeTrace:
                 self._attach_tags(conn, cur.lastrowid, tags)  # type: ignore[arg-type]
         self.refresh_cache()
 
-    def stop(self, at_time: datetime | None = None) -> None:
-        """Stop the active task (no-op if nothing is running).
-
-        If *at_time* is given the STOP entry uses that timestamp instead of
-        ``datetime.now()`` — useful for backdating an idle auto-stop so that
-        idle seconds are not included in the tracked duration.
-        """
+    def stop(self) -> None:
+        """Stop the active task (no-op if nothing is running)."""
         active = self.get_active()
         if not active or active["action"] != "START":
             return
-        now = at_time or datetime.now()
+        now = datetime.now()
         start_t = datetime.strptime(active["timestamp"], TIME_FORMAT)
         dur = str(now - start_t).split(".")[0]
 
@@ -559,105 +554,3 @@ class TimeTrace:
             matrix.append((label, row_vals))
 
         return matrix
-
-    # ------------------------------------------------------------------
-    # Timeline
-    # ------------------------------------------------------------------
-    def get_timeline_matrix(
-        self,
-        days: int = 7,
-        start_h: int = 8,
-        end_h: int = 20,
-        weekdays: str = "MTWTFSS",
-        period: str = "week",
-    ) -> list[tuple[str, list[tuple[str, float, float]]]]:
-        """Build a per-project timeline of continuous session blocks.
-
-        Returns ``[(day_label, [(project, start_frac, end_frac), ...])]``.
-        *start_frac* / *end_frac* are fractional hours (e.g. 9.5 = 09:30),
-        clamped to ``[start_h, end_h + 1]``.  Blocks are sorted by start
-        time and adjacent same-project blocks are merged.
-        """
-        now = datetime.now()
-
-        # Determine query range from period
-        period_start = self._parse_period_date(period)
-        if period_start:
-            query_date = period_start.strftime(TIME_FORMAT)
-            day_count = (now - period_start).days + 1
-        else:
-            day_count = days
-            query_date = (now - timedelta(days=day_count + 1)).replace(
-                hour=0, minute=0, second=0
-            ).strftime(TIME_FORMAT)
-
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM logs WHERE timestamp >= ? ORDER BY id ASC",
-                (query_date,),
-            ).fetchall()
-
-        # Collect raw session spans grouped by date
-        # {date_str: [(project, start_frac, end_frac), ...]}
-        day_sessions: dict[str, list[tuple[str, float, float]]] = {}
-
-        def _to_frac(dt: datetime) -> float:
-            return dt.hour + dt.minute / 60.0 + dt.second / 3600.0
-
-        def _add_session(t1: datetime, t2: datetime, project: str) -> None:
-            # A session may span multiple days — split at midnight
-            current = t1
-            while current < t2:
-                day_end = current.replace(hour=23, minute=59, second=59)
-                seg_end = min(day_end, t2)
-                date_key = current.strftime("%Y-%m-%d")
-                sf = max(_to_frac(current), float(start_h))
-                ef = min(_to_frac(seg_end), float(end_h + 1))
-                if ef > sf:
-                    day_sessions.setdefault(date_key, []).append((project, sf, ef))
-                # Jump to next day
-                current = (current + timedelta(days=1)).replace(hour=0, minute=0, second=0)
-
-        for start_row, stop_row, _secs in self._iter_sessions(rows):
-            t1 = datetime.strptime(start_row["timestamp"], TIME_FORMAT)
-            t2 = datetime.strptime(stop_row["timestamp"], TIME_FORMAT)
-            _add_session(t1, t2, start_row["task"])
-
-        # Active task
-        active = self.get_active()
-        if active and active["action"] == "START":
-            t1 = datetime.strptime(active["timestamp"], TIME_FORMAT)
-            _add_session(t1, datetime.now(), active["task"])
-
-        # Build matrix — most recent day first
-        matrix: list[tuple[str, list[tuple[str, float, float]]]] = []
-        for d in range(min(day_count, days)):
-            curr_date = now - timedelta(days=d)
-            wd = curr_date.weekday()
-            if wd < len(weekdays) and weekdays[wd] == "-":
-                continue
-
-            date_str = curr_date.strftime("%Y-%m-%d")
-            if d == 0:
-                label = "Today"
-            elif d == 1:
-                label = "Yday"
-            else:
-                label = curr_date.strftime("%a %d")
-
-            spans = day_sessions.get(date_str, [])
-            # Sort by start time then merge adjacent same-project blocks
-            spans.sort(key=lambda s: s[1])
-            merged: list[tuple[str, float, float]] = []
-            for proj, sf, ef in spans:
-                if merged and merged[-1][0] == proj and sf <= merged[-1][2] + 0.02:
-                    # Extend the previous block
-                    merged[-1] = (proj, merged[-1][1], max(merged[-1][2], ef))
-                else:
-                    merged.append((proj, sf, ef))
-
-            matrix.append((label, merged))
-
-        return matrix
-

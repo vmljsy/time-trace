@@ -1,174 +1,94 @@
 {
-    "options": [
-        {
-            "category": "BEHAVIOR",
-            "key": "idle_threshold",
-            "label": "Idle Warning",
-            "suffix": "s",
-            "type": "cycle",
-            "choices": [
-                10,
-                30,
-                60,
-                300,
-                600,
-                1800
-            ]
-        },
-        {
-            "category": "BEHAVIOR",
-            "key": "idle_sound",
-            "label": "Idle Sound",
-            "type": "bool"
-        },
-        {
-            "category": "BEHAVIOR",
-            "key": "idle_auto_stop",
-            "label": "Idle Auto-Stop",
-            "type": "bool"
-        },
-        {
-            "category": "BEHAVIOR",
-            "key": "idle_auto_resume",
-            "label": "Idle Auto-Resume",
-            "type": "bool"
-        },
-        {
-            "category": "BEHAVIOR",
-            "key": "auto_backup",
-            "label": "Auto Backup",
-            "type": "bool"
-        },
-        {
-            "category": "BEHAVIOR",
-            "key": "backup_freq",
-            "label": "Backup Freq",
-            "type": "cycle",
-            "choices": [
-                "STOP",
-                "DAILY",
-                "WEEKLY"
-            ]
-        },
-        {
-            "category": "VISUAL",
-            "key": "heatmap_days",
-            "label": "Heatmap Rows",
-            "type": "cycle",
-            "choices": [
-                7,
-                14,
-                28
-            ]
-        },
-        {
-            "category": "VISUAL",
-            "key": "heatmap_start",
-            "label": "Heatmap Start",
-            "suffix": "h",
-            "type": "cycle",
-            "choices": [
-                0,
-                6,
-                7,
-                8,
-                9,
-                10
-            ]
-        },
-        {
-            "category": "VISUAL",
-            "key": "heatmap_end",
-            "label": "Heatmap End",
-            "suffix": "h",
-            "type": "cycle",
-            "choices": [
-                17,
-                18,
-                20,
-                22,
-                23
-            ]
-        },
-        {
-            "category": "VISUAL",
-            "key": "heatmap_weekdays",
-            "label": "Heatmap Days",
-            "type": "cycle",
-            "choices": [
-                "MTWTFSS",
-                "MTWTF--",
-                "-----SS"
-            ]
-        },
-        {
-            "category": "VISUAL",
-            "key": "theme",
-            "label": "Theme",
-            "type": "cycle",
-            "choices": [
-                "Default",
-                "Dark",
-                "Retro",
-                "Ocean",
-                "Sunset",
-                "Forest",
-                "Nord",
-                "Dracula",
-                "Gruvbox",
-                "Monokai",
-                "Solarized",
-                "Synthwave",
-                "Cyberpunk",
-                "Rose Pine",
-                "Tokyo Night"
-            ]
-        },
-        {
-            "category": "VISUAL",
-            "key": "spinner_style",
-            "label": "Spinner Style",
-            "type": "cycle",
-            "choices": [
-                "dots",
-                "line",
-                "arrow",
-                "pulse",
-                "bouncing",
-                "runner"
-            ]
-        },
-        {
-            "category": "FEATURES",
-            "key": "feature_billing",
-            "label": "Billing",
-            "type": "bool"
-        },
-        {
-            "category": "FEATURES",
-            "key": "feature_html_report",
-            "label": "HTML Reports",
-            "type": "bool"
-        },
-        {
-            "category": "FEATURES",
-            "key": "notifications",
-            "label": "Notifications",
-            "type": "bool"
-        },
-        {
-            "category": "CORE",
-            "key": null,
-            "label": "DB Path",
-            "type": "info",
-            "display": "db_path"
-        },
-        {
-            "category": "CORE",
-            "key": null,
-            "label": "Webhooks",
-            "type": "info",
-            "display": "webhook_count"
-        }
-    ]
+  "options": [
+    {
+      "category": "BEHAVIOR",
+      "key": "idle_threshold",
+      "label": "Idle Warning",
+      "suffix": "s",
+      "type": "cycle",
+      "choices": [10, 30, 60, 300, 600, 1800]
+    },
+    {
+      "category": "BEHAVIOR",
+      "key": "auto_backup",
+      "label": "Auto Backup",
+      "type": "bool"
+    },
+    {
+      "category": "BEHAVIOR",
+      "key": "backup_freq",
+      "label": "Backup Freq",
+      "type": "cycle",
+      "choices": ["STOP", "DAILY", "WEEKLY"]
+    },
+    {
+      "category": "VISUAL",
+      "key": "heatmap_days",
+      "label": "Heatmap Rows",
+      "type": "cycle",
+      "choices": [7, 14, 28]
+    },
+    {
+      "category": "VISUAL",
+      "key": "heatmap_start",
+      "label": "Heatmap Start",
+      "suffix": "h",
+      "type": "cycle",
+      "choices": [0, 6, 7, 8, 9, 10]
+    },
+    {
+      "category": "VISUAL",
+      "key": "heatmap_end",
+      "label": "Heatmap End",
+      "suffix": "h",
+      "type": "cycle",
+      "choices": [17, 18, 20, 22, 23]
+    },
+    {
+      "category": "VISUAL",
+      "key": "heatmap_weekdays",
+      "label": "Heatmap Days",
+      "type": "cycle",
+      "choices": ["MTWTFSS", "MTWTF--", "-----SS"]
+    },
+    {
+      "category": "VISUAL",
+      "key": "theme",
+      "label": "Theme",
+      "type": "cycle",
+      "choices": ["Default", "Dark", "Retro", "Ocean", "Sunset", "Forest", "Nord", "Dracula", "Gruvbox", "Monokai", "Solarized", "Synthwave", "Cyberpunk", "Rose Pine", "Tokyo Night"]
+    },
+    {
+      "category": "FEATURES",
+      "key": "feature_billing",
+      "label": "Billing",
+      "type": "bool"
+    },
+    {
+      "category": "FEATURES",
+      "key": "feature_html_report",
+      "label": "HTML Reports",
+      "type": "bool"
+    },
+    {
+      "category": "FEATURES",
+      "key": "notifications",
+      "label": "Notifications",
+      "type": "bool"
+    },
+    {
+      "category": "CORE",
+      "key": null,
+      "label": "DB Path",
+      "type": "info",
+      "display": "db_path"
+    },
+    {
+      "category": "CORE",
+      "key": null,
+      "label": "Webhooks",
+      "type": "info",
+      "display": "webhook_count"
+    }
+  ]
 }

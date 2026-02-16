@@ -34,7 +34,7 @@ Track tasks, view reports, manage history — all from your terminal.
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-username/TimeTrace.git
+git clone https://github.com/vmljsy/time-trace.git
 cd TimeTrace
 
 # Run directly

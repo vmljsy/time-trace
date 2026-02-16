@@ -11,17 +11,7 @@ def install():
         print("❌ Error: 'trace.py' not found in this folder. Please place it here first.")
         return
 
-    # 2. Check Dependencies (Windows needs windows-curses)
-    if platform.system() == "Windows":
-        try:
-            import _curses
-        except ImportError:
-            print("📦 Installing 'windows-curses' dependency...")
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "windows-curses"])
-                print("✅ 'windows-curses' installed.")
-            except subprocess.CalledProcessError:
-                print("❌ Failed to install 'windows-curses'. Please install it manually.")
+
 
     # 3. Add Alias
     if platform.system() == "Windows":

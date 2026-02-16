@@ -17,6 +17,24 @@
         },
         {
             "category": "BEHAVIOR",
+            "key": "idle_sound",
+            "label": "Idle Sound",
+            "type": "bool"
+        },
+        {
+            "category": "BEHAVIOR",
+            "key": "idle_auto_stop",
+            "label": "Idle Auto-Stop",
+            "type": "bool"
+        },
+        {
+            "category": "BEHAVIOR",
+            "key": "idle_auto_resume",
+            "label": "Idle Auto-Resume",
+            "type": "bool"
+        },
+        {
+            "category": "BEHAVIOR",
             "key": "auto_backup",
             "label": "Auto Backup",
             "type": "bool"

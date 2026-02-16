@@ -46,3 +46,40 @@ class Platform:
                 return int(subprocess.check_output("xprintidle", shell=True)) / 1000.0
         except Exception:
             return 0.0
+
+    @staticmethod
+    def play_beep() -> None:
+        """Play a short system beep.  Fails silently."""
+        import threading
+
+        def _beep() -> None:
+            try:
+                if os.name == "nt":
+                    subprocess.Popen(
+                        ["powershell", "-WindowStyle", "Hidden", "-Command",
+                         "[Console]::Beep(800, 300)"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                elif sys.platform == "darwin":
+                    subprocess.Popen(
+                        ["afplay", "/System/Library/Sounds/Tink.aiff"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    # Try paplay, fall back to terminal bell
+                    try:
+                        subprocess.Popen(
+                            ["paplay", "/usr/share/sounds/freedesktop/stereo/bell.oga"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    except FileNotFoundError:
+                        print("\a", end="", flush=True)
+            except Exception:
+                pass
+
+        threading.Thread(target=_beep, daemon=True).start()
+

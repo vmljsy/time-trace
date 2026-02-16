@@ -69,6 +69,10 @@ class TraceTUI:
 
         self.tag_filter: str | None = None
 
+        # Idle management state
+        self.idle_notified: bool = False
+        self.idle_stopped_task: str = ""
+
         # Temporary state for multi-step flows
         self.config_options: list[tuple[str, str | None, str, str, Any]] = []
         self.temp_time: int = 0
@@ -115,6 +119,41 @@ class TraceTUI:
         if now - self.last_idle_check > 2.0:
             self.cached_idle = Platform.get_idle_seconds()
             self.last_idle_check = now
+
+            # ── Idle state machine ──
+            threshold = cfg.get("idle_threshold", 300)
+            active = self.app.get_active()
+            has_active = active and active["action"] == "START"
+
+            if has_active and self.cached_idle > threshold and not self.idle_notified:
+                # Idle threshold exceeded — fire alerts
+                self.idle_notified = True
+                if cfg.get("notifications", True):
+                    from timetrace.hooks import Notifier
+                    Notifier.send(
+                        "⚠️ Idle Warning",
+                        f"You've been idle for {int(self.cached_idle)}s while tracking '{active['task']}'",
+                    )
+                if cfg.get("idle_sound", True):
+                    Platform.play_beep()
+                if cfg.get("idle_auto_stop", False):
+                    # Save task name AND tags so they persist on resume
+                    tags = self.app._cache_active_tags
+                    tag_suffix = " " + " ".join(f"#{t}" for t in tags) if tags else ""
+                    self.idle_stopped_task = (active["task"] + tag_suffix).strip()
+                    
+                    # Backdate stop to when the user went idle, so idle
+                    # seconds are NOT included in the tracked session.
+                    idle_start = datetime.now() - timedelta(seconds=self.cached_idle)
+                    self.app.stop(at_time=idle_start)
+
+            elif self.idle_notified and self.cached_idle < 10:
+                # User returned from idle
+                if self.idle_stopped_task and cfg.get("idle_auto_resume", False):
+                    self.app.start(self.idle_stopped_task)
+                self.idle_notified = False
+                self.idle_stopped_task = ""
+
         if now - self.last_today_update > 60.0:
             self.cached_today = self.app.get_today_total()
             self.last_today_update = now
@@ -570,7 +609,12 @@ class TraceTUI:
 
             threshold = cfg.get("idle_threshold", 300)
             if self.cached_idle > threshold:
-                self.console.print_at(n+4, 45, f"⚠️ IDLE: {int(self.cached_idle)}s", theme["warn"])
+                idle_msg = f"⚠️ IDLE: {int(self.cached_idle)}s"
+                if self.idle_stopped_task:
+                    idle_msg += " (auto-stopped)"
+                elif cfg.get("idle_auto_stop", False):
+                    idle_msg += " (will auto-stop)"
+                self.console.print_at(n+4, 45, idle_msg, theme["warn"])
 
             today_sessions = len([
                 e for e in history

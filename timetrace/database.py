@@ -326,12 +326,17 @@ class TimeTrace:
                 self._attach_tags(conn, cur.lastrowid, tags)  # type: ignore[arg-type]
         self.refresh_cache()
 
-    def stop(self) -> None:
-        """Stop the active task (no-op if nothing is running)."""
+    def stop(self, at_time: datetime | None = None) -> None:
+        """Stop the active task (no-op if nothing is running).
+
+        If *at_time* is given the STOP entry uses that timestamp instead of
+        ``datetime.now()`` — useful for backdating an idle auto-stop so that
+        idle seconds are not included in the tracked duration.
+        """
         active = self.get_active()
         if not active or active["action"] != "START":
             return
-        now = datetime.now()
+        now = at_time or datetime.now()
         start_t = datetime.strptime(active["timestamp"], TIME_FORMAT)
         dur = str(now - start_t).split(".")[0]
 
